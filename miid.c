@@ -15,14 +15,16 @@
 #define STB_DS_IMPLEMENTATION
 #include "stb_ds.h"
 
+#define N_NOTES (1<<7)
+
 enum midi_event_type {
-	NOTE_OFF             = 0x80,
-	NOTE_ON              = 0x90,
-	POLY_AFTERTOUCH      = 0xa0,
-	CONTROL_CHANGE       = 0xb0,
-	PROGRAM_CHANGE       = 0xc0,
-	CHANNEL_AFTERTOUCH   = 0xd0,
-	PITCH_BEND           = 0xe0,
+	NOTE_OFF             = 0x80, // [key, velocity]
+	NOTE_ON              = 0x90, // [key, velocity]
+	POLY_AFTERTOUCH      = 0xa0, // [key, pressure]
+	CONTROL_CHANGE       = 0xb0, // [controller, value]
+	PROGRAM_CHANGE       = 0xc0, // [program]
+	CHANNEL_AFTERTOUCH   = 0xd0, // [pressure]
+	PITCH_BEND           = 0xe0, // [lsb7, msb7] 14-bit pitch value: lsb7+(msb7<<7)
 	SYSEX                = 0xf7,
 	META                 = 0xff,
 };
@@ -41,8 +43,33 @@ enum meta_type {
 	CUSTOM            = 0x7f,
 };
 
+enum cc_type {
+	MODULATION_WHEEL = 1,
+	VOLUME = 7,
+	PAN = 10,
+	DAMPER_PEDAL = 64,
+	EFFECT1_DEPTH = 91,
+	RESET_ALL_CONTROLLERS = 121,
+};
+
+#define EMIT_KITS                \
+	KIT(STANDARD_KIT, 1)     \
+	KIT(ROOM_KIT, 9)         \
+	KIT(POWER_KIT, 17)       \
+	KIT(ELECTRONIC_KIT, 25)  \
+	KIT(TR_808_KIT, 26)      \
+	KIT(JAZZ_KIT, 33)        \
+	KIT(BRUSH_KIT, 41)       \
+	KIT(ORCHESTRA_KIT, 49)   \
+	KIT(SOUND_FX_KIT, 57)    \
+
+enum kit_program {
+	#define KIT(NAME,ID) NAME = ID,
+	EMIT_KITS
+	#undef KIT
+};
+
 struct soundfont {
-	//int handle;
 	char* path;
 	int error;
 };
@@ -438,9 +465,12 @@ static struct mid* mid_load(char* path)
 			}
 			if (nstd >= 0) {
 				if (nn != current_midi_channel) {
-					//fprintf(stderr, "ERROR: %s channel mismatch nn=%d vs meta=%d\n", path, nn, current_midi_channel);
-					//return NULL;
-					fprintf(stderr, "WARNING: channel mismatch nn=%d vs meta=%d\n", nn, current_midi_channel);
+					if (current_midi_channel == -1) {
+						current_midi_channel = nn;
+					}
+					if (nn != current_midi_channel) {
+						fprintf(stderr, "WARNING: channel mismatch nn=%d vs meta=%d\n", nn, current_midi_channel);
+					}
 				}
 				mev.b[0] = b0;
 				for (int i = 0; i < nstd; i++) {
@@ -452,6 +482,34 @@ static struct mid* mid_load(char* path)
 					mev.b[i+1] = v;
 				}
 				emit_mev = 1;
+				#if 0
+				if (h0 == PROGRAM_CHANGE) {
+					printf("PRG %d on channel %d\n", mev.b[1], mev.b[0]&0xf);
+				}
+				#endif
+				if (h0 == CONTROL_CHANGE) {
+					const int controller = mev.b[1];
+					switch (controller) {
+						case VOLUME:
+						case PAN:
+						case MODULATION_WHEEL:
+						case DAMPER_PEDAL:
+						case EFFECT1_DEPTH:
+						case RESET_ALL_CONTROLLERS:
+							// handled (?)
+							break;
+						default:
+							fprintf(stderr, "WARNING: trashing CC[%d]=%d event on channel %d\n", mev.b[1], mev.b[2], mev.b[0]&0xf);
+							emit_mev = 0;
+							break;
+					}
+				} else if (h0 == POLY_AFTERTOUCH) {
+					fprintf(stderr, "WARNING: trashing POLY_AFTERTOUCH\n");
+					emit_mev = 0;
+				} else if (h0 == CHANNEL_AFTERTOUCH) {
+					fprintf(stderr, "WARNING: trashing CHANNEL_AFTERTOUCH\n");
+					emit_mev = 0;
+				}
 			}
 			if (emit_mev) {
 				arrput(trk->mev_arr, mev);
@@ -468,7 +526,9 @@ static struct mid* mid_load(char* path)
 			return NULL;
 		}
 
-		printf("trk [%s] nev=%ld\n", trk->title, arrlen(trk->mev_arr));
+		#if 0
+		printf("trk [%s] nev=%ld MIDI ch %d\n", trk->title, arrlen(trk->mev_arr), current_midi_channel);
+		#endif
 	}
 
 	return mid;
@@ -652,7 +712,6 @@ int main(int argc, char** argv)
 		glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
 		nvgBeginFrame(g.vg, g.screen_width / g.pixel_ratio, g.screen_height / g.pixel_ratio, g.pixel_ratio);
-
 
 		#if 0
 		nvgBeginPath(g.vg);
