@@ -358,7 +358,6 @@ static struct mid* mid_load(char* path)
 				}
 			} else if (b0 == 0xff) { // meta event
 				const int type = read_u8(f);
-				int write_type = -1;
 				int write_nmore = -1;
 				if (type < 0) {
 					fprintf(stderr, "ERROR: %s: bad meta type read\n", path);
@@ -394,7 +393,6 @@ static struct mid* mid_load(char* path)
 						fprintf(stderr, "ERROR: %s: expected len=1 for MIDI_CHANNEL\n", path);
 						return NULL;
 					}
-					write_type = MIDI_CHANNEL;
 					write_nmore = 1;
 					current_midi_channel = data[0];
 				} else if (type == END_OF_TRACK) {
@@ -403,14 +401,12 @@ static struct mid* mid_load(char* path)
 						return NULL;
 					}
 					end_of_track = 1;
-					write_type = END_OF_TRACK;
 					write_nmore = 0;
 				} else if (type == SET_TEMPO) {
 					if (len != 3) {
 						fprintf(stderr, "ERROR: %s: expected len=3 for SET_TEMPO\n", path);
 						return NULL;
 					}
-					write_type = SET_TEMPO;
 					write_nmore = 3;
 				} else if (type == SMPTE_OFFSET) {
 					if (len != 5) {
@@ -424,7 +420,6 @@ static struct mid* mid_load(char* path)
 						fprintf(stderr, "ERROR: %s: expected len=4 for TIME_SIGNATURE\n", path);
 						return NULL;
 					}
-					write_type = TIME_SIGNATURE;
 					write_nmore = 2;
 				} else if (type == KEY_SIGNATURE) {
 					fprintf(stderr, "WARNING: trashing KEY SIGNATURE\n");
@@ -436,10 +431,10 @@ static struct mid* mid_load(char* path)
 				}
 				if (str) free(str); // set str to NULL if you take ownership
 
-				if (write_type >= 0) {
-					assert((write_type < 0x80) && "conflict with normal MIDI");
+				if (write_nmore >= 0) {
+					assert((type < 0x80) && "conflict with normal MIDI");
 					assert(0 <= write_nmore && write_nmore < 4);
-					mev.b[0] = write_type;
+					mev.b[0] = type;
 					for (int i = 0; i < write_nmore; i++) {
 						mev.b[i+1] = data[i];
 					}
