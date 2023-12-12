@@ -166,6 +166,7 @@ struct mev {
 };
 
 struct trk {
+	int midi_channel;
 	char* title;
 	struct mev* mev_arr;
 };
@@ -299,9 +300,9 @@ static struct mid* mid_load(char* path)
 	mid->division = division;
 	arrsetlen(mid->trk_arr, n_tracks);
 
-	for (int i = 0; i < n_tracks; i++) {
+	for (int track_index = 0; track_index < n_tracks; track_index++) {
 		if (!skip_magic_string(f, "MTrk")) {
-			fprintf(stderr, "ERROR: %s: expected MTrk (t=%d)\n", path, i);
+			fprintf(stderr, "ERROR: %s: expected MTrk (t=%d)\n", path, track_index);
 			return NULL;
 		}
 		int remaining = read_i32_be(f);
@@ -310,7 +311,7 @@ static struct mid* mid_load(char* path)
 			return NULL;
 		}
 		int pos = 0;
-		struct trk* trk = &mid->trk_arr[i];
+		struct trk* trk = &mid->trk_arr[track_index];
 		int end_of_track = 0;
 		int last_b0 = -1;
 		int current_midi_channel = -1;
@@ -464,7 +465,8 @@ static struct mid* mid_load(char* path)
 						current_midi_channel = nn;
 					}
 					if (nn != current_midi_channel) {
-						fprintf(stderr, "WARNING: channel mismatch nn=%d vs meta=%d\n", nn, current_midi_channel);
+						fprintf(stderr, "ERROR: %s: channel mismatch nn=%d vs meta=%d\n", path, nn, current_midi_channel);
+						return NULL;
 					}
 				}
 				mev.b[0] = b0;
@@ -519,6 +521,14 @@ static struct mid* mid_load(char* path)
 		if (!end_of_track) {
 			fprintf(stderr, "ERROR: %s: encountered no end of track marker\n", path);
 			return NULL;
+		}
+
+		if (current_midi_channel == -1) {
+			// XXX typically seen on first MTrk?
+			fprintf(stderr, "WARNING: no MIDI channel (MTrk index %d)\n", track_index);
+			trk->midi_channel = -1;
+		} else {
+			trk->midi_channel = current_midi_channel;
 		}
 
 		#if 0
