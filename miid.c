@@ -44,12 +44,12 @@ enum meta_type {
 };
 
 enum cc_type {
-	MODULATION_WHEEL = 1,
-	VOLUME = 7,
-	PAN = 10,
-	DAMPER_PEDAL = 64,
-	EFFECT1_DEPTH = 91,
-	RESET_ALL_CONTROLLERS = 121,
+	MODULATION_WHEEL       = 1,
+	VOLUME                 = 7,
+	PAN                    = 10,
+	DAMPER_PEDAL           = 64,
+	EFFECT1_DEPTH          = 91,
+	RESET_ALL_CONTROLLERS  = 121,
 };
 
 #define EMIT_KITS                \
