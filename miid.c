@@ -174,6 +174,7 @@ struct trk {
 struct mid {
 	char* text;
 	int division;
+	int end_of_song_pos;
 	struct trk* trk_arr;
 };
 
@@ -402,7 +403,9 @@ static struct mid* mid_load(char* path)
 						return NULL;
 					}
 					end_of_track = 1;
-					write_nmore = 0;
+					if (pos >= mid->end_of_song_pos) {
+						mid->end_of_song_pos = pos;
+					}
 				} else if (type == SET_TEMPO) {
 					if (len != 3) {
 						fprintf(stderr, "ERROR: %s: expected len=3 for SET_TEMPO\n", path);
@@ -535,6 +538,10 @@ static struct mid* mid_load(char* path)
 		printf("trk [%s] nev=%ld MIDI ch %d\n", trk->title, arrlen(trk->mev_arr), current_midi_channel);
 		#endif
 	}
+
+	#if 0
+	printf("song length: %d\n", mid->end_of_song_pos);
+	#endif
 
 	return mid;
 
