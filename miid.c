@@ -91,6 +91,8 @@ struct trk {
 	int midi_channel;
 	char* name;
 	struct mev* mev_arr;
+	int has_meta;
+	int has_midi;
 };
 
 
@@ -448,7 +450,7 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 				}
 			} else if (b0 == META) { // meta event
 				const int type = read_u8(&p);
-				int write_nmore = -1;
+				int write_nmeta = -1;
 				if (type < 0) {
 					fprintf(stderr, "ERROR: bad meta type read\n");
 					return NULL;
@@ -503,7 +505,7 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 						fprintf(stderr, "ERROR: expected len=3 for SET_TEMPO\n");
 						return NULL;
 					}
-					write_nmore = 3;
+					write_nmeta = 3;
 				} else if (type == SMPTE_OFFSET) {
 					if (len != 5) {
 						fprintf(stderr, "ERROR: expected len=5 for SMPTE_OFFSET\n");
@@ -516,7 +518,7 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 						fprintf(stderr, "ERROR: expected len=4 for TIME_SIGNATURE\n");
 						return NULL;
 					}
-					write_nmore = 2;
+					write_nmeta = 2;
 				} else if (type == KEY_SIGNATURE) {
 					fprintf(stderr, "WARNING: trashing KEY SIGNATURE\n");
 				} else if (type == CUSTOM) {
@@ -526,14 +528,15 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 					fprintf(stderr, "WARNING: trashing unknown meta event type 0x%.2x\n", type);
 				}
 
-				if (write_nmore >= 0) {
+				if (write_nmeta >= 0) {
 					assert((type < 0x80) && "conflict with normal MIDI");
-					assert(0 <= write_nmore && write_nmore < 4);
+					assert(0 <= write_nmeta && write_nmeta < 4);
 					memset(mev.b, 0, ARRAY_LENGTH(mev.b));
 					mev.b[0] = type;
-					for (int i = 0; i < write_nmore; i++) {
+					for (int i = 0; i < write_nmeta; i++) {
 						mev.b[i+1] = data[i];
 					}
+					trk->has_meta = 1;
 					emit_mev = 1;
 				}
 			} else if (h0 == NOTE_OFF) {
@@ -573,6 +576,7 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 					}
 					mev.b[i+1] = v;
 				}
+				trk->has_midi = 1;
 				emit_mev = 1;
 				#if 0
 				if (h0 == PROGRAM_CHANGE) {
@@ -636,6 +640,33 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 
 	if (p.size > 0) {
 		fprintf(stderr, "WARNING: ignoring %zd bytes of trailing garbage\n", p.size);
+	}
+
+	// we have a constraint that the first track must be a tempo/time
+	// signature track, and the rest must be "normal" tracks (and they
+	// cannot be mixed). this seems to hold for the MIDI files I've seen,
+	// and it makes it easier to use the data as-is. it wouldn't be hard to
+	// FIXME but I need a file that breaks this convention.
+	for (int i = 0; i < n_tracks; i++) {
+		struct trk* trk = &mid->trk_arr[i];
+		if (trk->has_meta && trk->has_midi) {
+			// mixed track
+			fprintf(stderr, "ERROR: FIXME fixup not implemented (/1)\n");
+			return NULL;
+		}
+		if (trk->has_meta) {
+			if (i != 0) {
+				// meta track is not first
+				fprintf(stderr, "ERROR: FIXME fixup not implemented (/2)\n");
+				return NULL;
+			}
+		} else if (trk->has_midi) {
+			if (i == 0) {
+				// first track is "normal"
+				fprintf(stderr, "ERROR: FIXME fixup not implemented (/3)\n");
+				return NULL;
+			}
+		}
 	}
 
 	#if 0
@@ -766,10 +797,12 @@ static uint8_t* mid_marshal_arr(struct mid* mid)
 			evmetastr(&bs, TRACK_NAME, trk->name);
 		}
 
-		if (trk->midi_channel >= 0) {
+		const int midi_channel = trk->midi_channel;
+
+		if (midi_channel >= 0) {
 			evbegin(0, &cursor, &bs);
 			uint8_t* p = evmeta(&bs, MIDI_CHANNEL, 1);
-			p[0] = trk->midi_channel;
+			p[0] = midi_channel;
 		}
 
 		const int n_mev = arrlen(trk->mev_arr);
@@ -810,7 +843,7 @@ static uint8_t* mid_marshal_arr(struct mid* mid)
 			}
 			if (nw >= 0) {
 				assert(0 < nw && nw <= 3);
-				const int ch = trk->midi_channel;
+				const int ch = midi_channel;
 				assert(0 <= ch && ch < 16);
 				const int midi_cmd = (b0&0xf0) + ch;
 				if (midi_cmd != last_midi_cmd) {
