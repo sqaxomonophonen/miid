@@ -294,12 +294,17 @@ static int skip_magic_string(struct blob* p, char* s)
 	return memcmp(p0, s, n) == 0;
 }
 
-static char* read_string(struct blob* p, int n)
+static uint8_t* read_data(struct blob* p, int n)
 {
 	uint8_t* p0 = p->data;
 	if (!skip_n(p, n)) return NULL;
+	return p0;
+}
+
+static char* dup2str(uint8_t* data, int n)
+{
 	char* s = malloc(n+1);
-	memcpy(s, p0, n);
+	memcpy(s, data, n);
 	s[n] = 0;
 	return s;
 }
@@ -453,26 +458,27 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 					fprintf(stderr, "ERROR: bad meta type len\n");
 					return NULL;
 				}
-				char* str = read_string(&p, len);
-				uint8_t* data = (uint8_t*)str;
+				uint8_t* data = read_data(&p, len);
+				if (data == NULL) {
+					fprintf(stderr, "ERROR: bad data\n");
+					return NULL;
+				}
 				if (type == TEXT) {
 					if (mid->text == NULL) {
-						mid->text = str;
-						str = NULL; // own str
+						mid->text = dup2str(data, len);
 					} else {
-						fprintf(stderr, "WARNING: trashing TEXT [%s]; already got one\n", str);
+						fprintf(stderr, "WARNING: trashing TEXT; already got one\n");
 					}
 				} else if (type == TRACK_NAME) {
 					if (trk->name == NULL) {
-						trk->name = str;
-						str = NULL; // own str
+						trk->name = dup2str(data, len);
 					} else {
-						fprintf(stderr, "WARNING: trashing TRACK TITLE [%s]; already got one\n", str);
+						fprintf(stderr, "WARNING: trashing TRACK TITLE; already got one\n");
 					}
 				} else if (type == INSTRUMENT_NAME) {
-					fprintf(stderr, "WARNING: trashing INSTRUMENT NAME [%s]\n", str);
+					fprintf(stderr, "WARNING: trashing INSTRUMENT NAME\n");
 				} else if (type == MARKER) {
-					fprintf(stderr, "WARNING: trashing MARKER [%s]\n", str);
+					fprintf(stderr, "WARNING: trashing MARKER\n");
 				} else if (type == MIDI_CHANNEL) {
 					if (len != 1) {
 						fprintf(stderr, "ERROR: expected len=1 for MIDI_CHANNEL\n");
@@ -519,11 +525,11 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 				} else {
 					fprintf(stderr, "WARNING: trashing unknown meta event type 0x%.2x\n", type);
 				}
-				if (str) free(str); // set str to NULL if you take ownership
 
 				if (write_nmore >= 0) {
 					assert((type < 0x80) && "conflict with normal MIDI");
 					assert(0 <= write_nmore && write_nmore < 4);
+					memset(mev.b, 0, ARRAY_LENGTH(mev.b));
 					mev.b[0] = type;
 					for (int i = 0; i < write_nmore; i++) {
 						mev.b[i+1] = data[i];
