@@ -14,6 +14,8 @@ all: miid
 binfont.c: font.ttf
 	xxd -i $^ $@
 
+miid.o: miid.c config.h
+
 miid: miid.o nanovg.o nanovg_gl.o binfont.o
 
 clean:

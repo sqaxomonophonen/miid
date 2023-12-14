@@ -16,6 +16,8 @@
 #define STB_DS_IMPLEMENTATION
 #include "stb_ds.h"
 
+#include "config.h"
+
 #define ARRAY_LENGTH(xs) (sizeof(xs) / sizeof((xs)[0]))
 
 #define N_NOTES (1<<7)
@@ -920,7 +922,11 @@ int main(int argc, char** argv)
 			fprintf(stderr, "WARNING: invalid MIID_SZ value [%s]\n", MIID_SZ);
 		}
 	} else {
+		#ifdef C_DEFAULT_SIZE
+		g.cfgsz = C_DEFAULT_SIZE;
+		#else
 		g.cfgsz = 20;
+		#endif
 	}
 	const int MIN_CFGSZ = 5;
 	if (g.cfgsz < MIN_CFGSZ) g.cfgsz = MIN_CFGSZ;
@@ -956,8 +962,16 @@ int main(int argc, char** argv)
 				exit(EXIT_FAILURE);
 			}
 		} else {
+			#ifdef C_TTF
+			font = nvgCreateFont(g.vg, "font", C_TTF);
+			if (font == -1) {
+				fprintf(stderr, "%s: could not open TTF\n", C_TTF);
+				exit(EXIT_FAILURE);
+			}
+			#else
 			font = nvgCreateFontMem(g.vg, "font", font_ttf, font_ttf_len, 0);
 			assert((font != -1) && "invalid built-in font");
+			#endif
 		}
 	}
 
