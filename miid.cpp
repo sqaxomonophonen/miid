@@ -994,13 +994,11 @@ static void g_timeline(void)
 	struct trk* timetrk = &state.myd->trk_arr[0];
 	const int n_timetrack_events = arrlen(timetrk->mev_arr);
 	const ImVec2 reserve = ImGui::CalcTextSize("0000.0");
-	//int barpos = 0;
 	int numerator = 4;
 	int denominator_log2 = 2;
 	float beats_per_minute = 120.0;
 	int ttpos = 0;
 	float bx = state.beat0_x;
-	// XXX beat or quarter note? what if denominator is not 4?
 	const ImU32 tick0_color = ImGui::GetColorU32(ImVec4(1,1,1,1));
 	const ImU32 tick1_color = ImGui::GetColorU32(ImVec4(1,1,0,0.4));
 	const ImU32 bar_label_color = ImGui::GetColorU32(ImVec4(0,1,1,1.0));
