@@ -1044,7 +1044,7 @@ static void g_timeline(void)
 				snprintf(buf, sizeof buf, "%d", bar+1);
 			}
 			draw_list->AddText(
-				ImVec2(x0 + 5, p1.y - reserve.y - y0),
+				ImVec2(x0 + 5, p1.y - reserve.y),
 				bz ? bar_label_color : beat_label_color,
 				buf);
 		}
