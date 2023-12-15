@@ -1136,7 +1136,7 @@ static void g_timeline(void)
 			last_spanbx = bx;
 		}
 		pos += dshift(myd->division, flog2);
-		tickpos = (tickpos+1) % numerator; // XXX beat vs denom?
+		tickpos = (tickpos+1) % numerator;
 		if (tickpos == 0) bar++;
 		bx += tick_dx;
 	}
