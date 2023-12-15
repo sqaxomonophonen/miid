@@ -80,9 +80,12 @@ struct soundfont {
 	int error;
 };
 
-struct timespan {
-	int start;
-	int end;
+union timespan {
+	struct {
+		int start;
+		int end;
+	};
+	int s[2];
 };
 
 struct mev {
@@ -179,9 +182,9 @@ static inline struct blob arrblob(uint8_t* data_arr)
 
 struct medit {
 	struct blob mid_blob; // contains valid .mid after edit
-	struct timespan affected_timespan;
+	union timespan affected_timespan;
 	int affected_track_index;
-	struct timespan selected_timespan;
+	union timespan selected_timespan;
 };
 
 
@@ -204,7 +207,7 @@ struct g {
 struct state {
 	struct mid* myd;
 	int current_soundfont_index;
-	struct timespan selected_timespan;
+	union timespan selected_timespan;
 	float beat0_x;
 	float beat_dx;
 } state;
@@ -901,6 +904,7 @@ static void g_timeline(void)
 
 	ImGui::PushFont(g.fonts[1]);
 
+	struct mid* myd = state.myd;
 	ImGuiIO& io = ImGui::GetIO();
 	ImVec2 region = ImGui::GetContentRegionAvail();
 	const float w = region.x;
@@ -910,6 +914,7 @@ static void g_timeline(void)
 	const ImVec2 mpos = ImVec2(
 		io.MousePos.x - p0.x,
 		io.MousePos.y - p0.y);
+	const float mu = (float)((mpos.x - state.beat0_x) * myd->division) / state.beat_dx;
 
 	ImGui::InvisibleButton("##timeline", ImVec2(w, h), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
 	ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY); // grab mouse wheel
@@ -928,6 +933,7 @@ static void g_timeline(void)
 	} else if (click_lmb) {
 		st0 = LEFT_DRAG;
 		drag_button = 0;
+		state.selected_timespan.start = mu;
 	} else if (click_rmb) {
 		st0 = RIGHT_DRAG;
 		pan_last_x = 0;
@@ -941,6 +947,8 @@ static void g_timeline(void)
 			state.beat0_x += dx;
 		}
 		pan_last_x = x;
+	} else if (st0 == LEFT_DRAG) {
+		state.selected_timespan.end = mu;
 	}
 
 	if (state.beat_dx == 0.0) state.beat_dx = C_DEFAULT_BEAT_WIDTH_PX;
@@ -965,7 +973,19 @@ static void g_timeline(void)
 		))
 	);
 
-	struct mid* myd = state.myd;
+	{
+		float xs[2];
+		for (int i = 0; i < 2; i++) {
+			xs[i] = state.beat0_x + ((float)state.selected_timespan.s[i] / (float)myd->division) * state.beat_dx;
+		}
+		if (xs[1] != xs[0]) {
+			draw_list->AddRectFilled(
+				ImVec2(xs[0], p0.y),
+				ImVec2(xs[1], p1.y),
+				ImGui::GetColorU32(ImVec4(1, 1, 0, 0.2)));
+		}
+	}
+
 	assert(arrlen(state.myd->trk_arr) > 0);
 	struct trk* timetrk = &state.myd->trk_arr[0];
 	const int n_timetrack_events = arrlen(timetrk->mev_arr);
@@ -1028,7 +1048,6 @@ static void g_timeline(void)
 			ImVec2(x1,y1),
 			ImVec2(x0,y1),
 			bz ? tick0_color : tick1_color);
-
 
 		const int flog2 = -(denominator_log2-2);
 		const float tick_dx = state.beat_dx * powf(2.0, flog2);
