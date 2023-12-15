@@ -190,7 +190,7 @@ const float font_sizes[] = {
 	0.75,
 };
 
-struct {
+struct g {
 	float config_size1;
 	int using_audio;
 	SDL_Window* window;
@@ -198,13 +198,15 @@ struct {
 	SDL_AudioDeviceID audio_device;
 	fluid_synth_t* fluid_synth;
 	struct soundfont* soundfont_arr;
-	struct mid* myd;
 	struct medit* medit_arr;
 } g;
 
-struct {
+struct state {
+	struct mid* myd;
 	int current_soundfont_index;
 	struct timespan selected_timespan;
+	float beat0_x;
+	float beat_dx;
 } state;
 
 static void refresh_soundfont(void)
@@ -878,34 +880,81 @@ static inline float getsz(float scalar)
 	return g.config_size1 * scalar;
 }
 
+static inline int dshift(int v, int shift)
+{
+	if (shift == 0) return v;
+	if (shift > 0) return v << shift;
+	if (shift < 0) return v >> (-shift);
+	assert(!"UNREACHABLE");
+}
+
+
 static void g_timeline(void)
 {
+	const int IDLE=0, LEFT_DRAG=1, RIGHT_DRAG=2;
+
+	// local globals!
 	static float hover_factor = 0.0f;
-	static int v = 0;
+	static int st0 = IDLE;
+	static ImGuiMouseButton drag_button = 0;
+	static float pan_last_x = 0;
+
+	ImGui::PushFont(g.fonts[1]);
+
+	ImGuiIO& io = ImGui::GetIO();
 	ImVec2 region = ImGui::GetContentRegionAvail();
-	const ImVec2 p0 = ImGui::GetCursorScreenPos();
 	const float w = region.x;
-	const float h = 50;
+	const float h = getsz(3);
+	const ImVec2 p0 = ImGui::GetCursorScreenPos();
 	const ImVec2 p1 = ImVec2(p0.x + w, p0.y + h);
+	const ImVec2 mpos = ImVec2(
+		io.MousePos.x - p0.x,
+		io.MousePos.y - p0.y);
 
 	ImGui::InvisibleButton("##timeline", ImVec2(w, h), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
 	ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY); // grab mouse wheel
 
 	const bool is_drag = ImGui::IsItemActive();
 	const bool is_hover = ImGui::IsItemHovered();
-	ImGuiIO& io = ImGui::GetIO();
 
 	const float dh = io.DeltaTime * (1.0 / 0.1);
-	hover_factor = ImMax(0.0f, ImMin(1.0f, hover_factor + (is_hover ? dh : -dh)));
-	const ImVec2 mpos = ImVec2(
-		io.MousePos.x - p0.x,
-		io.MousePos.y - p0.y);
-	if (is_hover) {
-		v += io.MouseWheel;
+	hover_factor = ImMax(0.0f, ImMin(1.0f, hover_factor + ((is_hover || is_drag) ? dh : -dh)));
+
+	const bool click_lmb = is_hover && ImGui::IsMouseClicked(0);
+	const bool click_rmb = is_hover && ImGui::IsMouseClicked(1);
+
+	if (!is_drag && st0 > IDLE) {
+		st0 = IDLE;
+	} else if (click_lmb) {
+		st0 = LEFT_DRAG;
+		drag_button = 0;
+	} else if (click_rmb) {
+		st0 = RIGHT_DRAG;
+		pan_last_x = 0;
+		drag_button = 1;
 	}
 
+	if (st0 == RIGHT_DRAG) {
+		const float x = ImGui::GetMouseDragDelta(drag_button).x;
+		const float dx = x - pan_last_x;
+		if (dx != 0.0) {
+			state.beat0_x += dx;
+		}
+		pan_last_x = x;
+	}
 
-	ImGui::PushFont(g.fonts[1]);
+	if (state.beat_dx == 0.0) state.beat_dx = C_DEFAULT_BEAT_WIDTH_PX;
+
+	if (is_hover && !is_drag) {
+		const float mw = io.MouseWheel;
+		if (mw != 0) {
+			const float zoom_scalar = powf(C_TIMELINE_ZOOM_SENSITIVITY, mw);
+			const float new_beat_dx = state.beat_dx * zoom_scalar;
+			state.beat0_x = -((mpos.x - state.beat0_x) / state.beat_dx) * new_beat_dx + mpos.x;
+			state.beat_dx = new_beat_dx;
+		}
+	}
+
 	ImDrawList* draw_list = ImGui::GetWindowDrawList();
 
 	draw_list->AddRectFilled(p0, p1,
@@ -916,14 +965,60 @@ static void g_timeline(void)
 		))
 	);
 
-	draw_list->AddText(
-		ImVec2(p0.x + 20, p0.y + 20),
-		ImGui::GetColorU32(ImVec4(1,1,1,1)),
-		"1.1");
+	struct mid* myd = state.myd;
+	assert(arrlen(state.myd->trk_arr) > 0);
+	struct trk* timetrk = &state.myd->trk_arr[0];
+	const int n_timetrack_events = arrlen(timetrk->mev_arr);
+	const ImVec2 reserve = ImGui::CalcTextSize("0000.0");
+	//int barpos = 0;
+	int numerator = 4;
+	int denominator_log2 = 2;
+	float beats_per_minute = 120.0;
+	int ttpos = 0;
+	float bx = state.beat0_x;
+	// XXX beat or quarter note? what if denominator is not 4?
+	const ImU32 tick0_color = ImGui::GetColorU32(ImVec4(1,1,1,1));
+	const ImU32 tick1_color = ImGui::GetColorU32(ImVec4(1,1,0,0.4));
+	const ImU32 bar_label_color = ImGui::GetColorU32(ImVec4(0,1,1,1.0));
+	const ImU32 beat_label_color = ImGui::GetColorU32(ImVec4(0,1,1,0.5));
+	const ImU32 signature_color = ImGui::GetColorU32(ImVec4(1,0.5,1,1));
+	int bar = 0;
+	int tick = 0;
+	int tickpos = 0;
+	int pos = 0;
+	while (pos <= myd->end_of_song_pos) {
+		bool has_signature_change = false;
+		bool has_tempo_change = false;
+		for (;;) {
+			if (ttpos >= n_timetrack_events) break;
+			struct mev* mev = &timetrk->mev_arr[ttpos];
+			if (mev->pos > pos) break;
+			const uint8_t b0 = mev->b[0];
+			if (b0 == TIME_SIGNATURE) {
+				has_signature_change = true;
+				numerator = mev->b[1];
+				denominator_log2 = mev->b[2];
+				if (tickpos != 0) {
+					bar++;
+					tickpos = 0;
+				}
+			} else if (b0 == SET_TEMPO) {
+				has_tempo_change = true;
+				const int microseconds_per_quarter_note =
+					((int)(mev->b[1]) << 16) +
+					((int)(mev->b[2]) << 8)  +
+					((int)(mev->b[3]))       ;
+				beats_per_minute = 60e6/microseconds_per_quarter_note;
+			} else {
+				assert(!"unhandled time track event");
+			}
+			ttpos++;
+		}
 
-	for (int i = 0; i < 50; i++) {
-		const float m = 1.0f;
-		const float x0 = p0.x + (float)i * 24.1f - m/2;
+		const bool bz = tickpos == 0;
+
+		const float m = bz ? 2.0f : 1.0;
+		const float x0 = p0.x + bx - m/2;
 		const float y0 = p0.y;
 		const float x1 = x0+m;
 		const float y1 = y0+h;
@@ -932,19 +1027,58 @@ static void g_timeline(void)
 			ImVec2(x1,y0),
 			ImVec2(x1,y1),
 			ImVec2(x0,y1),
-			ImGui::GetColorU32(ImVec4(1,1,1,0.1)));
-	}
-	ImGui::PopFont();
+			bz ? tick0_color : tick1_color);
 
-	ImGui::Text("%d %s", v, is_drag ? "dragging" : "not dragging");
-	if (is_hover || is_drag) {
-		ImGui::Text("[%f,%f]", mpos.x, mpos.y);
+
+		const int flog2 = -(denominator_log2-2);
+		const float tick_dx = state.beat_dx * powf(2.0, flog2);
+		const bool print_per_beat = tick_dx > reserve.x;
+
+		const bool print = bz || print_per_beat;
+		char buf[1<<10];
+
+		if (print) {
+			if (print_per_beat) {
+				snprintf(buf, sizeof buf, "%d.%d", bar+1, tickpos+1);
+			} else {
+				snprintf(buf, sizeof buf, "%d", bar+1);
+			}
+			draw_list->AddText(
+				ImVec2(x0 + 5, p1.y - reserve.y - y0),
+				bz ? bar_label_color : beat_label_color,
+				buf);
+		}
+
+		if (has_signature_change || has_tempo_change) {
+			const int denominator = 1<<denominator_log2;
+			if (has_signature_change && has_tempo_change) {
+				snprintf(buf, sizeof buf, "%.1fBPM %d/%d", beats_per_minute, numerator, denominator);
+			} else if (has_signature_change) {
+				snprintf(buf, sizeof buf, "%d/%d", numerator, denominator);
+			} else if (has_tempo_change) {
+				snprintf(buf, sizeof buf, "%.1fBPM", beats_per_minute);
+			} else {
+				assert(!"UNREACHABLE");
+			}
+			draw_list->AddText(
+				ImVec2(x0 + 5, p0.y),
+				signature_color,
+				buf);
+		}
+
+
+		pos += dshift(myd->division, flog2);
+		tickpos = (tickpos+1) % numerator; // XXX beat vs denom?
+		if (tickpos == 0) bar++;
+		bx += tick_dx;
 	}
+
+	ImGui::PopFont();
 }
 
 static void g_root(void)
 {
-	#if 1
+	#if 0
 	for (int i = 0; i < 10; i++) {
 		ImGui::Text("PAD %d", i);
 	}
@@ -975,8 +1109,8 @@ int main(int argc, char** argv)
 		assert(!"TODO create midi file");
 	}
 
-	g.myd = mid_unmarshal_blob(mid_blob);
-	uint8_t* out_arr = mid_marshal_arr(g.myd);
+	state.myd = mid_unmarshal_blob(mid_blob);
+	uint8_t* out_arr = mid_marshal_arr(state.myd);
 	arr_write_file(out_arr, "_.mid");
 
 	char* MIID_SF2 = getenv("MIID_SF2");
@@ -993,11 +1127,7 @@ int main(int argc, char** argv)
 			fprintf(stderr, "WARNING: invalid MIID_SZ value [%s]\n", MIID_SZ);
 		}
 	} else {
-		#ifdef C_DEFAULT_SIZE
 		g.config_size1 = C_DEFAULT_SIZE;
-		#else
-		g.config_size1 = 20;
-		#endif
 	}
 
 	{
