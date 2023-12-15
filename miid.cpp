@@ -7,11 +7,12 @@
 #include <SDL.h>
 #include "gl.h"
 
-#include <fluidsynth.h>
+#include "imgui.h"
+#include "imgui_internal.h"
+#include "imgui_impl_sdl2.h"
+#include "imgui_impl_opengl2.h"
 
-#include "nanovg.h"
-#include "nanovg_gl.h"
-//#include "nanovg_gl_utils.h"
+#include <fluidsynth.h>
 
 #define STB_DS_IMPLEMENTATION
 #include "stb_ds.h"
@@ -142,7 +143,7 @@ static struct blob blob_load(char* path)
 		return noblob;
 	}
 
-	uint8_t* data = malloc(size);
+	uint8_t* data = (uint8_t*)malloc(size);
 
 	if (fread(data, size, 1, f) != 1) {
 		fprintf(stderr, "%s: %s\n", path, strerror(errno));
@@ -154,21 +155,21 @@ static struct blob blob_load(char* path)
 
 	return (struct blob) {
 		.data = data,
-		.size = size,
+		.size = (size_t)size,
 	};
 }
 
 static inline struct blob blob_slice(struct blob blob, int offset)
 {
 	if (offset == 0) return blob;
-	if (offset > 0) assert((offset <= blob.size) && "slice out of bounds");
+	if (offset > 0) assert((offset <= (int)blob.size) && "slice out of bounds");
 	return (struct blob) {
 		.data = blob.data + offset,
 		.size = blob.size - offset,
 	};
 }
 
-static inline struct blob arrblob(void* data_arr)
+static inline struct blob arrblob(uint8_t* data_arr)
 {
 	return (struct blob) {
 		.data = data_arr,
@@ -183,16 +184,17 @@ struct medit {
 	struct timespan selected_timespan;
 };
 
+
+const float font_sizes[] = {
+	1.0,
+	0.75,
+};
+
 struct {
-	int cfgsz;
+	float config_size1;
 	int using_audio;
 	SDL_Window* window;
-	int true_screen_width;
-	int true_screen_height;
-	int screen_width;
-	int screen_height;
-	float pixel_ratio;
-	NVGcontext* vg;
+	ImFont* fonts[ARRAY_LENGTH(font_sizes)];
 	SDL_AudioDeviceID audio_device;
 	fluid_synth_t* fluid_synth;
 	struct soundfont* soundfont_arr;
@@ -232,23 +234,9 @@ static void refresh_soundfont(void)
 		sf->path);
 }
 
-static void populate_screen_globals(void)
-{
-	//int prev_width = g.true_screen_width;
-	//int prev_height = g.true_screen_height;
-	SDL_GL_GetDrawableSize(g.window, &g.true_screen_width, &g.true_screen_height);
-	int w, h;
-	SDL_GetWindowSize(g.window, &w, &h);
-	g.pixel_ratio = (float)g.true_screen_width / (float)w;
-	g.screen_width = g.true_screen_width / g.pixel_ratio;
-	g.screen_height = g.true_screen_height / g.pixel_ratio;
-}
-
 // via binfont.c
 extern unsigned char font_ttf[];
 extern unsigned int font_ttf_len;
-
-NVGcontext* nvgCreateGL2(int flags);
 
 static void audio_callback(void* usr, Uint8* stream, int len)
 {
@@ -263,7 +251,7 @@ static void audio_callback(void* usr, Uint8* stream, int len)
 static char* copystring(char* src)
 {
 	const size_t sz = strlen(src);
-	char* dst = malloc(sz+1);
+	char* dst = (char*)malloc(sz+1);
 	memcpy(dst, src, sz);
 	dst[sz] = 0;
 	return dst;
@@ -284,12 +272,12 @@ static void unread_u8(struct blob* p)
 
 static int skip_n(struct blob* p, int n)
 {
-	if (p->size < n) return 0;
+	if ((int)p->size < n) return 0;
 	*p = blob_slice(*p, n);
 	return 1;
 }
 
-static int skip_magic_string(struct blob* p, char* s)
+static int skip_magic_string(struct blob* p, const char* s)
 {
 	const size_t n = strlen(s);
 	uint8_t* p0 = p->data;
@@ -307,7 +295,7 @@ static uint8_t* read_data(struct blob* p, int n)
 
 static char* dup2str(uint8_t* data, int n)
 {
-	char* s = malloc(n+1);
+	char* s = (char*)malloc(n+1);
 	memcpy(s, data, n);
 	s[n] = 0;
 	return s;
@@ -359,7 +347,7 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 		return NULL;
 	}
 	if (read_i32_be(&p) != 6) {
-		fprintf(stderr, "ERROR: bad header ("MThd" size not 6)\n");
+		fprintf(stderr, "ERROR: bad header (" MThd " size not 6)\n");
 		return NULL;
 	}
 
@@ -381,7 +369,7 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 		return NULL;
 	}
 
-	struct mid* mid = calloc(1, sizeof *mid);
+	struct mid* mid = (struct mid*)calloc(1, sizeof *mid);
 	mid->division = division;
 	arrsetlen(mid->trk_arr, n_tracks);
 
@@ -887,7 +875,90 @@ static uint8_t* mid_marshal_arr(struct mid* mid)
 
 static inline float getsz(float scalar)
 {
-	return (float)g.cfgsz * scalar;
+	return g.config_size1 * scalar;
+}
+
+static void g_timeline(void)
+{
+	static float hover_factor = 0.0f;
+	static int v = 0;
+	ImVec2 region = ImGui::GetContentRegionAvail();
+	const ImVec2 p0 = ImGui::GetCursorScreenPos();
+	const float w = region.x;
+	const float h = 50;
+	const ImVec2 p1 = ImVec2(p0.x + w, p0.y + h);
+
+	ImGui::InvisibleButton("##timeline", ImVec2(w, h), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+	ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY); // grab mouse wheel
+
+	const bool is_drag = ImGui::IsItemActive();
+	const bool is_hover = ImGui::IsItemHovered();
+	ImGuiIO& io = ImGui::GetIO();
+
+	const float dh = io.DeltaTime * (1.0 / 0.1);
+	hover_factor = ImMax(0.0f, ImMin(1.0f, hover_factor + (is_hover ? dh : -dh)));
+	const ImVec2 mpos = ImVec2(
+		io.MousePos.x - p0.x,
+		io.MousePos.y - p0.y);
+	if (is_hover) {
+		v += io.MouseWheel;
+	}
+
+
+	ImGui::PushFont(g.fonts[1]);
+	ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+	draw_list->AddRectFilled(p0, p1,
+		ImGui::GetColorU32(ImLerp(
+			ImVec4(0.2,  0.2,  0.2,  1),
+			ImVec4(0.1,  0.1,  0.5,  1),
+			hover_factor
+		))
+	);
+
+	draw_list->AddText(
+		ImVec2(p0.x + 20, p0.y + 20),
+		ImGui::GetColorU32(ImVec4(1,1,1,1)),
+		"1.1");
+
+	for (int i = 0; i < 50; i++) {
+		const float m = 1.0f;
+		const float x0 = p0.x + (float)i * 24.1f - m/2;
+		const float y0 = p0.y;
+		const float x1 = x0+m;
+		const float y1 = y0+h;
+		draw_list->AddQuadFilled(
+			ImVec2(x0,y0),
+			ImVec2(x1,y0),
+			ImVec2(x1,y1),
+			ImVec2(x0,y1),
+			ImGui::GetColorU32(ImVec4(1,1,1,0.1)));
+	}
+	ImGui::PopFont();
+
+	ImGui::Text("%d %s", v, is_drag ? "dragging" : "not dragging");
+	if (is_hover || is_drag) {
+		ImGui::Text("[%f,%f]", mpos.x, mpos.y);
+	}
+}
+
+static void g_root(void)
+{
+	#if 1
+	for (int i = 0; i < 10; i++) {
+		ImGui::Text("PAD %d", i);
+	}
+	#endif
+	g_timeline();
+	for (int i = 0; i < 100; i++) {
+		ImGui::Text("SCROLL %d", i);
+	}
+	#if 0
+	ImGui::Dummy(ImVec2(200, 200));
+	ImGui::SameLine();
+	ImGui::Button("b0");
+	ImGui::Button("b1");
+	#endif
 }
 
 int main(int argc, char** argv)
@@ -917,19 +988,22 @@ int main(int argc, char** argv)
 
 	char* MIID_SZ = getenv("MIID_SZ");
 	if (MIID_SZ != NULL && strlen(MIID_SZ) > 0) {
-		g.cfgsz = atoi(MIID_SZ);
-		if (g.cfgsz == 0) {
+		g.config_size1 = atoi(MIID_SZ);
+		if (g.config_size1 == 0) {
 			fprintf(stderr, "WARNING: invalid MIID_SZ value [%s]\n", MIID_SZ);
 		}
 	} else {
 		#ifdef C_DEFAULT_SIZE
-		g.cfgsz = C_DEFAULT_SIZE;
+		g.config_size1 = C_DEFAULT_SIZE;
 		#else
-		g.cfgsz = 20;
+		g.config_size1 = 20;
 		#endif
 	}
-	const int MIN_CFGSZ = 5;
-	if (g.cfgsz < MIN_CFGSZ) g.cfgsz = MIN_CFGSZ;
+
+	{
+		const float MIN_CONFIG_SIZE1 = 8;
+		if (g.config_size1 < MIN_CONFIG_SIZE1) g.config_size1 = MIN_CONFIG_SIZE1;
+	}
 
 	assert(SDL_Init(SDL_INIT_TIMER | (g.using_audio?SDL_INIT_AUDIO:0) | SDL_INIT_VIDEO) == 0);
 	atexit(SDL_Quit);
@@ -949,33 +1023,31 @@ int main(int argc, char** argv)
 	SDL_GLContext glctx = SDL_GL_CreateContext(g.window);
 	assert(glctx);
 
-	g.vg = nvgCreateGL2(NVG_ANTIALIAS | NVG_STENCIL_STROKES);
-	assert(g.vg != NULL);
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGuiIO& io = ImGui::GetIO();
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+	ImGui::StyleColorsDark();
+
+	ImGui_ImplSDL2_InitForOpenGL(g.window, glctx);
+	ImGui_ImplOpenGL2_Init();
 
 	{
 		char* MIID_TTF = getenv("MIID_TTF");
-		int font = 0;
-		if (MIID_TTF != NULL && strlen(MIID_TTF) > 0) {
-			font = nvgCreateFont(g.vg, "font", MIID_TTF);
-			if (font == -1) {
-				fprintf(stderr, "%s: could not open TTF\n", MIID_TTF);
-				exit(EXIT_FAILURE);
+		for (int i = 0; i < ARRAY_LENGTH(font_sizes); i++) {
+			const float sz = getsz(font_sizes[i]);
+			if (MIID_TTF != NULL && strlen(MIID_TTF) > 0) {
+				g.fonts[i] = io.Fonts->AddFontFromFileTTF(MIID_TTF, sz);
+			} else {
+				#ifdef C_TTF
+				g.fonts[i] = io.Fonts->AddFontFromFileTTF(C_TTF, sz);
+				#else
+				g.fonts[i] = io.Fonts->AddFontFromMemoryTTF(font_ttf, font_ttf_len, sz);
+				#endif
 			}
-		} else {
-			#ifdef C_TTF
-			font = nvgCreateFont(g.vg, "font", C_TTF);
-			if (font == -1) {
-				fprintf(stderr, "%s: could not open TTF\n", C_TTF);
-				exit(EXIT_FAILURE);
-			}
-			#else
-			font = nvgCreateFontMem(g.vg, "font", font_ttf, font_ttf_len, 0);
-			assert((font != -1) && "invalid built-in font");
-			#endif
 		}
+		io.Fonts->Build();
 	}
-
-	populate_screen_globals();
 
 	if (g.using_audio) {
 		SDL_AudioSpec have = {0}, want = {0};
@@ -1021,67 +1093,37 @@ int main(int argc, char** argv)
 	while (!exiting) {
 		SDL_Event e;
 		while (SDL_PollEvent(&e)) {
-			if (e.type == SDL_QUIT) {
+			if ((e.type == SDL_QUIT) || (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_CLOSE)) {
 				exiting = 1;
-			} else if (e.type == SDL_KEYDOWN) {
-				SDL_Keycode sym = e.key.keysym.sym;
-				const int ch = 9;
-				if (sym == SDLK_ESCAPE) {
-					exiting = 1;
-				// XXX debugging stuff...
-				} else if (sym == '[') {
-					state.current_soundfont_index--;
-					refresh_soundfont();
-				} else if (sym == ']') {
-					state.current_soundfont_index++;
-					refresh_soundfont();
-				} else if (sym == '1') {
-					printf("NOTE ON\n");
-					fluid_synth_program_change(
-						g.fluid_synth,
-						ch, 1);
-					fluid_synth_noteon(
-						g.fluid_synth,
-						ch, 60, 127);
-				} else if (sym == '2') {
-					printf("NOTE OFF\n");
-					fluid_synth_noteoff(
-						g.fluid_synth,
-						ch, 60);
-				}
-			} else if (e.type == SDL_WINDOWEVENT) {
-				if (e.window.event == SDL_WINDOWEVENT_RESIZED) {
-					populate_screen_globals();
-				}
 			}
+			ImGui_ImplSDL2_ProcessEvent(&e);
 		}
 
-		glViewport(0, 0, g.true_screen_width, g.true_screen_height);
-		glClearColor(0,0,0,1);
-		glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+		ImGui_ImplOpenGL2_NewFrame();
+		ImGui_ImplSDL2_NewFrame();
+		ImGui::NewFrame();
 
-		nvgBeginFrame(g.vg, g.screen_width / g.pixel_ratio, g.screen_height / g.pixel_ratio, g.pixel_ratio);
-
-		#if 0
-		nvgBeginPath(g.vg);
-		nvgRect(g.vg, 20, 20, 40, 40);
-		nvgFillColor(g.vg, nvgRGB(255,255,255));
-		nvgFill(g.vg);
-		#endif
-
-		{
-			nvgFontSize(g.vg, getsz(1));
-			nvgTextAlign(g.vg, NVG_ALIGN_LEFT);
-			nvgFillColor(g.vg, nvgRGB(255,255,255));
-
-			for (int i = 0; i < arrlen(g.myd->trk_arr); i++) {
-				struct trk* trk = &g.myd->trk_arr[i];
-				if (trk->name == NULL) continue;
-				nvgText(g.vg, getsz(1), (1+i) * getsz(1), trk->name, NULL);
-			}
+		if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+			exiting = 1;
 		}
 
-		nvgEndFrame(g.vg);
+		const ImGuiWindowFlags root_window_flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground;
+		ImGui::SetNextWindowPos(ImVec2(0,0));
+		ImGui::SetNextWindowSize(io.DisplaySize);
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0,0));
+		if (ImGui::Begin("root", NULL, root_window_flags)) {
+			ImGui::PushFont(g.fonts[0]);
+			g_root();
+			ImGui::PopFont();
+			ImGui::End();
+		}
+		ImGui::PopStyleVar();
+
+		ImGui::Render();
+		glViewport(0, 0, (int)io.DisplaySize.x, (int)io.DisplaySize.y);
+		glClearColor(0, 0, 0, 0);
+		glClear(GL_COLOR_BUFFER_BIT);
+		ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
 		SDL_GL_SwapWindow(g.window);
 	}
 

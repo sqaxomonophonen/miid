@@ -1,22 +1,23 @@
-CFLAGS+=-std=gnu11
-CFLAGS+=-Wall
+CXXFLAGS+=-std=c++11
+CXXFLAGS+=-Wno-narrowing
+LDLIBS+=-lm -pthread
+CXXFLAGS+=-O0 -g
 
 PKGS=sdl2 gl fluidsynth
-CFLAGS+=$(shell pkg-config --cflags ${PKGS})
+CXXFLAGS+=$(shell pkg-config --cflags ${PKGS})
 LDLIBS+=$(shell pkg-config --libs ${PKGS})
-
-LDLIBS+=-lm
-
-CFLAGS+=-O0 -g
 
 all: miid
 
 binfont.c: font.ttf
 	xxd -i $^ $@
 
-miid.o: miid.c config.h
+IMGUI_OBJS=imgui.o imgui_widgets.o imgui_tables.o imgui_draw.o imgui_impl_sdl2.o imgui_impl_opengl2.o
 
-miid: miid.o nanovg.o nanovg_gl.o binfont.o
+miid.o: miid.cpp config.h
+
+miid: miid.o binfont.o $(IMGUI_OBJS)
+	$(CXX) $^ $(LDLIBS) -o $@
 
 clean:
 	rm -f *.o miid
