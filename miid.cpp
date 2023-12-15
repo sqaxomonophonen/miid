@@ -204,12 +204,20 @@ struct g {
 	struct medit* medit_arr;
 } g;
 
+enum {
+	SELECT_BAR = 0,
+	SELECT_TICK,
+	SELECT_FINE,
+};
+
 struct state {
 	struct mid* myd;
 	int current_soundfont_index;
 	union timespan selected_timespan;
 	float beat0_x;
 	float beat_dx;
+	bool bar_select;
+	int timespan_select_mode = SELECT_BAR;
 } state;
 
 static void refresh_soundfont(void)
@@ -1002,23 +1010,50 @@ static void g_timeline(void)
 	int tick = 0;
 	int tickpos = 0;
 	int pos = 0;
-	int last_pos = 0;
-	float last_bx = bx;
+	int last_spanpos = 0;
+	float last_spanbx = bx;
+
+	if (st0 == LEFT_DRAG && state.timespan_select_mode == SELECT_FINE) {
+		if (reset_selected_timespan) {
+			state.selected_timespan.start = mu;
+			state.selected_timespan.end = mu;
+		} else {
+			if (mu < state.selected_timespan.start) {
+				state.selected_timespan.start = mu;
+				if (state.selected_timespan.start < 0) {
+					state.selected_timespan.start = 0;
+				}
+			}
+			if (mu > state.selected_timespan.end) {
+				state.selected_timespan.end = mu;
+				if (state.selected_timespan.end > myd->end_of_song_pos) {
+					state.selected_timespan.start = myd->end_of_song_pos;
+				}
+			}
+		}
+	}
 
 	while (pos <= myd->end_of_song_pos) {
-		if (last_bx <= mpos.x && mpos.x < bx) {
+		const bool is_spanpos =
+			(st0 == LEFT_DRAG) &&
+			(
+			((state.timespan_select_mode == SELECT_BAR) && tickpos == 0) ||
+			(state.timespan_select_mode == SELECT_TICK)
+			);
+		if (is_spanpos && last_spanbx <= mpos.x && mpos.x < bx) {
 			if (reset_selected_timespan) {
-				state.selected_timespan.start = last_pos;
+				state.selected_timespan.start = last_spanpos;
 				state.selected_timespan.end = pos;
 			} else if (st0 == LEFT_DRAG) {
-				if (last_pos < state.selected_timespan.start) {
-					state.selected_timespan.start = last_pos;
+				if (last_spanpos < state.selected_timespan.start) {
+					state.selected_timespan.start = last_spanpos;
 				}
 				if (pos > state.selected_timespan.end) {
 					state.selected_timespan.end = pos;
 				}
 			}
 		}
+
 		bool has_signature_change = false;
 		bool has_tempo_change = false;
 		for (;;) {
@@ -1098,11 +1133,13 @@ static void g_timeline(void)
 		}
 
 
-		last_pos = pos;
+		if (is_spanpos) {
+			last_spanpos = pos;
+			last_spanbx = bx;
+		}
 		pos += dshift(myd->division, flog2);
 		tickpos = (tickpos+1) % numerator; // XXX beat vs denom?
 		if (tickpos == 0) bar++;
-		last_bx = bx;
 		bx += tick_dx;
 	}
 
@@ -1117,6 +1154,26 @@ static void g_root(void)
 	}
 	#endif
 	g_timeline();
+
+	const ImVec2 bsz = ImVec2(getsz(3),0);
+	switch (state.timespan_select_mode) {
+	case SELECT_BAR:
+		if (ImGui::Button("Bar", bsz)) {
+			state.timespan_select_mode = SELECT_TICK;
+		}
+		break;
+	case SELECT_TICK:
+		if (ImGui::Button("Tick", bsz)) {
+			state.timespan_select_mode = SELECT_FINE;
+		}
+		break;
+	case SELECT_FINE:
+		if (ImGui::Button("Fine", bsz)) {
+			state.timespan_select_mode = SELECT_BAR;
+		}
+		break;
+	}
+
 	for (int i = 0; i < 100; i++) {
 		ImGui::Text("SCROLL %d", i);
 	}
