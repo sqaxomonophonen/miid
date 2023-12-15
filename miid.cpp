@@ -899,7 +899,6 @@ static void g_timeline(void)
 	// local globals!
 	static float hover_factor = 0.0f;
 	static int st0 = IDLE;
-	static ImGuiMouseButton drag_button = 0;
 	static float pan_last_x = 0;
 
 	ImGui::PushFont(g.fonts[1]);
@@ -928,27 +927,24 @@ static void g_timeline(void)
 	const bool click_lmb = is_hover && ImGui::IsMouseClicked(0);
 	const bool click_rmb = is_hover && ImGui::IsMouseClicked(1);
 
+	bool reset_selected_timespan = false;
 	if (!is_drag && st0 > IDLE) {
 		st0 = IDLE;
 	} else if (click_lmb) {
 		st0 = LEFT_DRAG;
-		drag_button = 0;
-		state.selected_timespan.start = mu;
+		reset_selected_timespan = true;
 	} else if (click_rmb) {
 		st0 = RIGHT_DRAG;
 		pan_last_x = 0;
-		drag_button = 1;
 	}
 
 	if (st0 == RIGHT_DRAG) {
-		const float x = ImGui::GetMouseDragDelta(drag_button).x;
+		const float x = ImGui::GetMouseDragDelta(1).x;
 		const float dx = x - pan_last_x;
 		if (dx != 0.0) {
 			state.beat0_x += dx;
 		}
 		pan_last_x = x;
-	} else if (st0 == LEFT_DRAG) {
-		state.selected_timespan.end = mu;
 	}
 
 	if (state.beat_dx == 0.0) state.beat_dx = C_DEFAULT_BEAT_WIDTH_PX;
@@ -1006,7 +1002,23 @@ static void g_timeline(void)
 	int tick = 0;
 	int tickpos = 0;
 	int pos = 0;
+	int last_pos = 0;
+	float last_bx = bx;
+
 	while (pos <= myd->end_of_song_pos) {
+		if (last_bx <= mpos.x && mpos.x < bx) {
+			if (reset_selected_timespan) {
+				state.selected_timespan.start = last_pos;
+				state.selected_timespan.end = pos;
+			} else if (st0 == LEFT_DRAG) {
+				if (last_pos < state.selected_timespan.start) {
+					state.selected_timespan.start = last_pos;
+				}
+				if (pos > state.selected_timespan.end) {
+					state.selected_timespan.end = pos;
+				}
+			}
+		}
 		bool has_signature_change = false;
 		bool has_tempo_change = false;
 		for (;;) {
@@ -1086,9 +1098,11 @@ static void g_timeline(void)
 		}
 
 
+		last_pos = pos;
 		pos += dshift(myd->division, flog2);
 		tickpos = (tickpos+1) % numerator; // XXX beat vs denom?
 		if (tickpos == 0) bar++;
+		last_bx = bx;
 		bx += tick_dx;
 	}
 
