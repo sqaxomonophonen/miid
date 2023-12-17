@@ -99,10 +99,7 @@ struct trk {
 	int midi_channel;
 	char* name;
 	struct mev* mev_arr;
-	bool has_meta;
-	bool has_midi;
 };
-
 
 struct mid {
 	char* text;
@@ -441,9 +438,17 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 	mid->text = alloc_text_field();
 	arrsetlen(mid->trk_arr, n_tracks);
 
-	for (int track_index = 0; track_index < n_tracks; track_index++) {
+	const int HAS_META = 1<<0, HAS_MIDI = 1<<1;
+	int* trk_flags = NULL;
+	arrsetlen(trk_flags, n_tracks);
+	int track_index = 0;
+	while (track_index < n_tracks) {
 		const int is_MTrk = skip_magic_string(&p, "MTrk");
 		const int chunk_size = read_i32_be(&p);
+		if (chunk_size == -1) {
+			fprintf(stderr, "ERROR: bad read");
+			return NULL;
+		}
 
 		if (!is_MTrk) {
 			if (!skip_n(&p, chunk_size)) {
@@ -461,6 +466,8 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 		int pos = 0;
 		struct trk* trk = &mid->trk_arr[track_index];
 		memset(trk, 0, sizeof *trk);
+		int* flags = &trk_flags[track_index];
+		*flags = 0;
 		trk->name = alloc_text_field();
 		int end_of_track = 0;
 		int last_b0 = -1;
@@ -587,7 +594,7 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 					for (int i = 0; i < write_nmeta; i++) {
 						mev.b[i+1] = data[i];
 					}
-					trk->has_meta = true;
+					*flags |= HAS_META;
 					emit_mev = 1;
 				}
 			} else if (h0 == NOTE_OFF) {
@@ -627,7 +634,7 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 					}
 					mev.b[i+1] = v;
 				}
-				trk->has_midi = true;
+				*flags |= HAS_MIDI;
 				emit_mev = 1;
 				#if 0
 				if (h0 == PROGRAM_CHANGE) {
@@ -683,6 +690,8 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 			trk->midi_channel = current_midi_channel;
 			assert(trk->midi_channel >= 0);
 		}
+
+		track_index++;
 	}
 
 	if (p.size > 0) {
@@ -695,19 +704,19 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 	// and it makes it easier to use the data as-is. it wouldn't be hard to
 	// FIXME but I need a file that breaks this convention.
 	for (int i = 0; i < n_tracks; i++) {
-		struct trk* trk = &mid->trk_arr[i];
-		if (trk->has_meta && trk->has_midi) {
+		int flags = trk_flags[i];
+		if ((flags & HAS_META) && (flags & HAS_META)) {
 			// mixed track
 			fprintf(stderr, "ERROR: FIXME fixup not implemented (/1)\n");
 			return NULL;
 		}
-		if (trk->has_meta) {
+		if (flags & HAS_META) {
 			if (i != 0) {
 				// meta track is not first
 				fprintf(stderr, "ERROR: FIXME fixup not implemented (/2)\n");
 				return NULL;
 			}
-		} else if (trk->has_midi) {
+		} else if (flags & HAS_MIDI) {
 			if (i == 0) {
 				// first track is "normal"
 				fprintf(stderr, "ERROR: FIXME fixup not implemented (/3)\n");
@@ -1470,7 +1479,6 @@ static struct mid* mid_new(void)
 	memset(trk, 0, sizeof *trk);
 	trk->midi_channel = -1;
 	trk->name = alloc_text_field();
-	trk->has_meta = true;
 	return m;
 }
 
