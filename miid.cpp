@@ -1492,15 +1492,8 @@ static void state_common_init(struct state* st, int mode0)
 	st->glctx = SDL_GL_CreateContext(st->window);
 	assert(st->glctx);
 
-	st->imctx = ImGui::CreateContext(shared_font_atlas);
-	ImGui::SetCurrentContext(st->imctx);
-	ImGuiIO& io = ImGui::GetIO();
-	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-	ImGui::StyleColorsDark();
-	ImGui_ImplSDL2_InitForOpenGL(st->window, st->glctx);
-	ImGui_ImplOpenGL2_Init();
 	if (shared_font_atlas == NULL) {
-		shared_font_atlas = io.Fonts;
+		shared_font_atlas = new ImFontAtlas();
 		char* MIID_TTF = getenv("MIID_TTF");
 		for (int i = 0; i < ARRAY_LENGTH(font_sizes); i++) {
 			const float sz = getsz(font_sizes[i]);
@@ -1517,8 +1510,15 @@ static void state_common_init(struct state* st, int mode0)
 			}
 		}
 		shared_font_atlas->Build();
-		assert(io.Fonts == shared_font_atlas);
 	}
+	assert(shared_font_atlas != NULL);
+	st->imctx = ImGui::CreateContext(shared_font_atlas);
+	ImGui::SetCurrentContext(st->imctx);
+	ImGuiIO& io = ImGui::GetIO();
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+	ImGui::StyleColorsDark();
+	ImGui_ImplSDL2_InitForOpenGL(st->window, st->glctx);
+	ImGui_ImplOpenGL2_Init();
 
 	st->mode0 = mode0;
 }
@@ -1691,6 +1691,12 @@ int main(int argc, char** argv)
 
 		for (int i = 0; i < n_states; i++) {
 			struct state* st = g.curstate = &g.state_arr[i];
+			#if 1
+			if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+				// XXX remove this eventually?
+				st->mode0 = MODE0_DO_CLOSE;
+			}
+			#endif
 			if (st->mode0 == MODE0_DO_CLOSE) {
 				ImGui::DestroyContext(st->imctx);
 				SDL_GL_DeleteContext(st->glctx);
@@ -1708,10 +1714,6 @@ int main(int argc, char** argv)
 			ImGui_ImplOpenGL2_NewFrame();
 			ImGui_ImplSDL2_NewFrame();
 			ImGui::NewFrame();
-
-			if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-				exiting = 1;
-			}
 
 			const ImGuiWindowFlags root_window_flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground;
 			ImGui::SetNextWindowPos(ImVec2(0,0));
