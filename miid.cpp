@@ -93,10 +93,11 @@ struct mev {
 	uint8_t b[4];
 };
 
-#define TEXT_FIELD_SIZE (1<<8)
+#define TEXT_FIELD_SIZE (1<<10)
+
 struct trk {
 	int midi_channel;
-	char name[TEXT_FIELD_SIZE];
+	char* name;
 	struct mev* mev_arr;
 	int has_meta;
 	int has_midi;
@@ -104,14 +105,14 @@ struct trk {
 
 
 struct mid {
-	char text[TEXT_FIELD_SIZE];
+	char* text;
 	int division;
 	int end_of_song_pos;
 	struct trk* trk_arr;
 };
 
 
-static void arr_write_file(uint8_t* out_arr, const char* path)
+static void write_file_from_arr(uint8_t* out_arr, const char* path)
 {
 	FILE* f = fopen(path, "wb");
 	assert((f != NULL) && "cannot write file");
@@ -194,26 +195,27 @@ const float font_sizes[] = {
 	0.75,
 };
 
-struct g {
-	float config_size1;
-	int using_audio;
-	SDL_Window* window;
-	ImFont* fonts[ARRAY_LENGTH(font_sizes)];
-	SDL_AudioDeviceID audio_device;
-	fluid_synth_t* fluid_synth;
-	struct soundfont* soundfont_arr;
-	struct medit* medit_arr;
-} g;
-
 enum {
 	SELECT_BAR = 0,
 	SELECT_TICK,
 	SELECT_FINE,
 };
 
+enum {
+	MODE0_EDIT, // normal edit mode
+	MODE0_ASK,  // no argv; [New Song] [Load Song] [Exit]?
+	MODE0_NEW,  // song foo.mid does not exist; [Create It] [Exit]?
+	MODE0_LOAD, // "load song" dialog
+	MODE0_SAVE, // "save song as" dialog
+};
+
 struct state {
+	int mode0;
+	SDL_Window* window;
+	SDL_GLContext glctx;
+	ImGuiContext* imctx;
 	struct mid* myd;
-	int current_soundfont_index;
+	struct medit* medit_arr;
 	union timespan selected_timespan;
 	float beat0_x;
 	float beat_dx;
@@ -221,22 +223,50 @@ struct state {
 	int timespan_select_mode = SELECT_BAR;
 	bool track_select_set[1<<8];
 	int primary_track_select = -1;
-} state;
+
+	struct {
+		bool show_tracks = true;
+		int hover_row_index = -1;
+		int drag_state;
+		float pan_last_x;
+		int popup_editing_track_index;
+	} header;
+};
+
+
+struct g {
+	float config_size1;
+	int using_audio;
+	ImFont* fonts[ARRAY_LENGTH(font_sizes)];
+	SDL_AudioDeviceID audio_device;
+	fluid_synth_t* fluid_synth;
+	int current_soundfont_index;
+	struct soundfont* soundfont_arr;
+	struct state* state_arr;
+	struct state* curstate;
+} g;
+
+
+static inline struct state* curstate(void)
+{
+	assert(g.curstate != NULL);
+	return g.curstate;
+}
 
 static void refresh_soundfont(void)
 {
 	if (!g.using_audio) return;
 
 	const int n = arrlen(g.soundfont_arr);
-	if (state.current_soundfont_index >= n) {
-		state.current_soundfont_index = 0;
-	} else if (state.current_soundfont_index < 0) {
-		state.current_soundfont_index = n-1;
+	if (g.current_soundfont_index >= n) {
+		g.current_soundfont_index = 0;
+	} else if (g.current_soundfont_index < 0) {
+		g.current_soundfont_index = n-1;
 	}
-	if (state.current_soundfont_index < 0) {
+	if (g.current_soundfont_index < 0) {
 		return;
 	}
-	struct soundfont* sf = &g.soundfont_arr[state.current_soundfont_index];
+	struct soundfont* sf = &g.soundfont_arr[g.current_soundfont_index];
 	if (sf->error) return;
 
 	const int handle = fluid_synth_sfload(g.fluid_synth, sf->path, /*reset_presets=*/1);
@@ -246,7 +276,7 @@ static void refresh_soundfont(void)
 		return;
 	}
 	fprintf(stderr, "INFO: loaded SoundFont #%d %s\n",
-		state.current_soundfont_index,
+		g.current_soundfont_index,
 		sf->path);
 }
 
@@ -369,6 +399,11 @@ static void handle_text(const char* what, char* text, uint8_t* data, int len)
 	}
 }
 
+static char* alloc_text_field(void)
+{
+	return (char*)calloc(TEXT_FIELD_SIZE, 1);
+}
+
 static struct mid* mid_unmarshal_blob(struct blob blob)
 {
 	struct blob p = blob;
@@ -401,6 +436,7 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 
 	struct mid* mid = (struct mid*)calloc(1, sizeof *mid);
 	mid->division = division;
+	mid->text = alloc_text_field();
 	arrsetlen(mid->trk_arr, n_tracks);
 
 	for (int track_index = 0; track_index < n_tracks; track_index++) {
@@ -423,6 +459,7 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 		int pos = 0;
 		struct trk* trk = &mid->trk_arr[track_index];
 		memset(trk, 0, sizeof *trk);
+		trk->name = alloc_text_field();
 		int end_of_track = 0;
 		int last_b0 = -1;
 		int current_midi_channel = -1;
@@ -644,10 +681,6 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 			trk->midi_channel = current_midi_channel;
 			assert(trk->midi_channel >= 0);
 		}
-
-		#if 0
-		printf("trk [%s] nev=%ld MIDI ch %d\n", trk->name, arrlen(trk->mev_arr), current_midi_channel);
-		#endif
 	}
 
 	if (p.size > 0) {
@@ -804,10 +837,8 @@ static uint8_t* mid_marshal_arr(struct mid* mid)
 
 		int cursor = 0;
 
-		if (trk->name) {
-			evbegin(0, &cursor, &bs);
-			evmetastr(&bs, TRACK_NAME, trk->name);
-		}
+		evbegin(0, &cursor, &bs);
+		evmetastr(&bs, TRACK_NAME, trk->name);
 
 		const int midi_channel = trk->midi_channel;
 
@@ -897,6 +928,7 @@ static uint8_t* mid_marshal_arr(struct mid* mid)
 
 static inline float getsz(float scalar)
 {
+	assert((g.config_size1 > 0) && "called before init?");
 	return g.config_size1 * scalar;
 }
 
@@ -925,19 +957,20 @@ ImVec4 color_add(ImVec4 a, ImVec4 b)
 
 static void track_toggle(int index)
 {
-	struct mid* mid = state.myd;
+	struct state* state = curstate();
+	struct mid* mid = state->myd;
 	if (mid == NULL) return;
 	const int n = arrlen(mid->trk_arr);
 	if (!(0 <= index && index < n)) return;
-	if (index >= ARRAY_LENGTH(state.track_select_set)) return;
-	if (state.track_select_set[index]) {
-		state.track_select_set[index] = false;
-		if (index == state.primary_track_select) {
-			state.primary_track_select = -1;
+	if (index >= ARRAY_LENGTH(state->track_select_set)) return;
+	if (state->track_select_set[index]) {
+		state->track_select_set[index] = false;
+		if (index == state->primary_track_select) {
+			state->primary_track_select = -1;
 		}
 	} else {
-		state.primary_track_select = index;
-		state.track_select_set[index] = true;
+		state->primary_track_select = index;
+		state->track_select_set[index] = true;
 	}
 }
 
@@ -955,13 +988,8 @@ static void ToggleButton(const char* label, bool* p, ImVec4 color)
 
 static void g_header(void)
 {
-	const int IDLE=0, TIMESPAN_DRAG=1, PAN_DRAG=2;
-
-	static bool show_tracks = true; // FIXME does this belong in `state`?
-	static int st0 = IDLE;
-	static float pan_last_x = 0;
-	static int hover_row_index = -1;
-	static int popup_editing_track_index = 0;
+	const int IDLE=0, TIMESPAN_PAINT=1, TIME_PAN=2;
+	struct state* state = curstate();
 
 	float layout_y0s[1<<8];
 	float layout_x1 = 0;
@@ -981,10 +1009,10 @@ static void g_header(void)
 		ImGui::TableSetupColumn("ctrl",     ImGuiTableColumnFlags_WidthFixed);
 		ImGui::TableSetupColumn("timeline", ImGuiTableColumnFlags_WidthStretch);
 
-		struct mid* mid = state.myd;
+		struct mid* mid = state->myd;
 		const int n_tracks = arrlen(mid->trk_arr) - 1;
 		struct trk* tracks = &mid->trk_arr[1];
-		const int n_rows = 1 + (show_tracks ? n_tracks : 0);
+		const int n_rows = 1 + (state->header.show_tracks ? n_tracks : 0);
 
 		bool try_track_select = false;
 
@@ -1000,13 +1028,13 @@ static void g_header(void)
 
 			if (row_index > 0) {
 				ImVec4 c = (row_index & 1) == 1 ? C_TRACK_ROW_EVEN_COLOR : C_TRACK_ROW_ODD_COLOR;
-				if (row_index == hover_row_index) {
+				if (row_index == state->header.hover_row_index) {
 					c = color_add(c, C_TRACK_ROW_HOVER_ADD_COLOR);
 				}
 				const int track_index = row_index - 1;
-				if (track_index == state.primary_track_select) {
+				if (track_index == state->primary_track_select) {
 					c = color_add(c, C_TRACK_ROW_PRIMARY_SELECTION_ADD_COLOR);
-				} else if (state.track_select_set[track_index]) {
+				} else if (state->track_select_set[track_index]) {
 					c = color_add(c, C_TRACK_ROW_SECONDARY_SELECTION_ADD_COLOR);
 				}
 				ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::GetColorU32(c));
@@ -1020,26 +1048,26 @@ static void g_header(void)
 					ImGui::SameLine();
 					if (ImGui::Button("Loop")) {
 					}
-					ToggleButton("T", &show_tracks, C_TRACKS_ROW_TOGGLE_COLOR);
+					ToggleButton("T", &state->header.show_tracks, C_TRACKS_ROW_TOGGLE_COLOR);
 					ImGui::SetItemTooltip("Toggle track rows visibility");
 
 					ImGui::SameLine();
 
 					const ImVec2 bsz = ImVec2(getsz(3),0);
-					switch (state.timespan_select_mode) {
+					switch (state->timespan_select_mode) {
 					case SELECT_BAR:
 						if (ImGui::Button("Bar", bsz)) {
-							state.timespan_select_mode = SELECT_TICK;
+							state->timespan_select_mode = SELECT_TICK;
 						}
 						break;
 					case SELECT_TICK:
 						if (ImGui::Button("Tick", bsz)) {
-							state.timespan_select_mode = SELECT_FINE;
+							state->timespan_select_mode = SELECT_FINE;
 						}
 						break;
 					case SELECT_FINE:
 						if (ImGui::Button("Fine", bsz)) {
-							state.timespan_select_mode = SELECT_BAR;
+							state->timespan_select_mode = SELECT_BAR;
 						}
 						break;
 					}
@@ -1115,15 +1143,18 @@ static void g_header(void)
 				if (mid->division < 1) mid->division = 1;
 				if (mid->division > 0x7fff) mid->division = 0x7fff;
 			}
+			if (ImGui::Button("Save")) {
+				// TODO
+			}
 			ImGui::EndPopup();
 		}
 
 		if (do_popup_editing_track_index >= 0) {
-			popup_editing_track_index = do_popup_editing_track_index;
+			state->header.popup_editing_track_index = do_popup_editing_track_index;
 			ImGui::OpenPopup("track_edit_popup");
 		}
 		if (ImGui::BeginPopup("track_edit_popup")) {
-			struct trk* trk = &tracks[popup_editing_track_index];
+			struct trk* trk = &tracks[state->header.popup_editing_track_index];
 			ImGui::SeparatorText("Track Edit");
 
 			ImGui::InputText("Name", trk->name, TEXT_FIELD_SIZE);
@@ -1133,34 +1164,34 @@ static void g_header(void)
 				if (trk->midi_channel > 15) trk->midi_channel = 15;
 			}
 
-			const bool can_move_up = popup_editing_track_index > 0;
-			const bool can_move_down = popup_editing_track_index < n_tracks-1;
+			const bool can_move_up = state->header.popup_editing_track_index > 0;
+			const bool can_move_down = state->header.popup_editing_track_index < n_tracks-1;
 			ImGui::BeginDisabled(!can_move_up);
 			if (ImGui::Button("Move Up")) {
-				struct trk tmp = tracks[popup_editing_track_index-1];
-				tracks[popup_editing_track_index-1] = tracks[popup_editing_track_index];
-				tracks[popup_editing_track_index] = tmp;
-				popup_editing_track_index--;
+				struct trk tmp = tracks[state->header.popup_editing_track_index-1];
+				tracks[state->header.popup_editing_track_index-1] = tracks[state->header.popup_editing_track_index];
+				tracks[state->header.popup_editing_track_index] = tmp;
+				state->header.popup_editing_track_index--;
 			}
 			ImGui::EndDisabled();
 			ImGui::SameLine();
 			ImGui::BeginDisabled(!can_move_down);
 			if (ImGui::Button("Down")) {
-				struct trk tmp = tracks[popup_editing_track_index+1];
-				tracks[popup_editing_track_index+1] = tracks[popup_editing_track_index];
-				tracks[popup_editing_track_index] = tmp;
-				popup_editing_track_index++;
+				struct trk tmp = tracks[state->header.popup_editing_track_index+1];
+				tracks[state->header.popup_editing_track_index+1] = tracks[state->header.popup_editing_track_index];
+				tracks[state->header.popup_editing_track_index] = tmp;
+				state->header.popup_editing_track_index++;
 			}
 			ImGui::EndDisabled();
 
-			if (popup_editing_track_index < 10) {
-				ImGui::Text("Select with [%c]", "1234567890"[popup_editing_track_index]);
+			if (state->header.popup_editing_track_index < 10) {
+				ImGui::Text("Select with [%c]", "1234567890"[state->header.popup_editing_track_index]);
 			}
 			ImGui::EndPopup();
 		}
 
 		const float mx = io.MousePos.x - layout_x1;
-		const float mu = (float)((mx - state.beat0_x) * mid->division) / state.beat_dx;
+		const float mu = (float)((mx - state->beat0_x) * mid->division) / state->beat_dx;
 
 		{
 			ImGui::SetCursorPos(ImVec2(layout_x1, table_p0.y));
@@ -1175,39 +1206,39 @@ static void g_header(void)
 			const bool click_lmb = is_hover && ImGui::IsMouseClicked(0);
 			const bool click_rmb = is_hover && ImGui::IsMouseClicked(1);
 
-			if (!is_drag && st0 > IDLE) {
-				st0 = IDLE;
+			if (!is_drag && state->header.drag_state > IDLE) {
+				state->header.drag_state = IDLE;
 			} else if (click_lmb) {
 				const float my = io.MousePos.y;
 				if (layout_y0s[0] <= my && my < layout_y0s[1]) {
-					st0 = TIMESPAN_DRAG;
+					state->header.drag_state = TIMESPAN_PAINT;
 					reset_selected_timespan = true;
 				} else {
 					try_track_select = true;
 				}
 			} else if (click_rmb) {
-				st0 = PAN_DRAG;
-				pan_last_x = 0;
+				state->header.drag_state = TIME_PAN;
+				state->header.pan_last_x = 0;
 			}
 
-			if (st0 == PAN_DRAG) {
+			if (state->header.drag_state == TIME_PAN) {
 				const float x = ImGui::GetMouseDragDelta(1).x;
-				const float dx = x - pan_last_x;
+				const float dx = x - state->header.pan_last_x;
 				if (dx != 0.0) {
-					state.beat0_x += dx;
+					state->beat0_x += dx;
 				}
-				pan_last_x = x;
+				state->header.pan_last_x = x;
 			}
 
-			if (state.beat_dx == 0.0) state.beat_dx = C_DEFAULT_BEAT_WIDTH_PX;
+			if (state->beat_dx == 0.0) state->beat_dx = C_DEFAULT_BEAT_WIDTH_PX;
 
 			if (is_hover && !is_drag) {
 				const float mw = io.MouseWheel;
 				if (mw != 0) {
 					const float zoom_scalar = powf(C_TIMELINE_ZOOM_SENSITIVITY, mw);
-					const float new_beat_dx = state.beat_dx * zoom_scalar;
-					state.beat0_x = -((mx - state.beat0_x) / state.beat_dx) * new_beat_dx + mx;
-					state.beat_dx = new_beat_dx;
+					const float new_beat_dx = state->beat_dx * zoom_scalar;
+					state->beat0_x = -((mx - state->beat0_x) / state->beat_dx) * new_beat_dx + mx;
+					state->beat_dx = new_beat_dx;
 				}
 			}
 		}
@@ -1244,7 +1275,7 @@ static void g_header(void)
 			int denominator_log2 = 2;
 			float beats_per_minute = 120.0;
 			int ttpos = 0;
-			float bx = state.beat0_x;
+			float bx = state->beat0_x;
 			int bar = 0;
 			int tick = 0;
 			int tickpos = 0;
@@ -1252,21 +1283,21 @@ static void g_header(void)
 			int last_spanpos = 0;
 			float last_spanbx = bx;
 
-			if (st0 == TIMESPAN_DRAG && state.timespan_select_mode == SELECT_FINE) {
+			if (state->header.drag_state == TIMESPAN_PAINT && state->timespan_select_mode == SELECT_FINE) {
 				if (reset_selected_timespan) {
-					state.selected_timespan.start = mu;
-					state.selected_timespan.end = mu;
+					state->selected_timespan.start = mu;
+					state->selected_timespan.end = mu;
 				} else {
-					if (mu < state.selected_timespan.start) {
-						state.selected_timespan.start = mu;
-						if (state.selected_timespan.start < 0) {
-							state.selected_timespan.start = 0;
+					if (mu < state->selected_timespan.start) {
+						state->selected_timespan.start = mu;
+						if (state->selected_timespan.start < 0) {
+							state->selected_timespan.start = 0;
 						}
 					}
-					if (mu > state.selected_timespan.end) {
-						state.selected_timespan.end = mu;
-						if (state.selected_timespan.end > mid->end_of_song_pos) {
-							state.selected_timespan.start = mid->end_of_song_pos;
+					if (mu > state->selected_timespan.end) {
+						state->selected_timespan.end = mu;
+						if (state->selected_timespan.end > mid->end_of_song_pos) {
+							state->selected_timespan.start = mid->end_of_song_pos;
 						}
 					}
 				}
@@ -1277,11 +1308,11 @@ static void g_header(void)
 			draw_list->PushClipRect(clip0, clip1);
 
 			{
-				const float t0 = (float)state.selected_timespan.s[0];
-				const float t1 = (float)state.selected_timespan.s[1];
+				const float t0 = (float)state->selected_timespan.s[0];
+				const float t1 = (float)state->selected_timespan.s[1];
 				if (t0 != t1) {
-					const float off = layout_x1 + state.beat0_x;
-					const float s = state.beat_dx / (float)mid->division;
+					const float off = layout_x1 + state->beat0_x;
+					const float s = state->beat_dx / (float)mid->division;
 					const float x0 = off + t0 * s;
 					const float x1 = off + t1 * s;
 					draw_list->AddRectFilled(
@@ -1299,21 +1330,21 @@ static void g_header(void)
 
 			while (pos <= mid->end_of_song_pos) {
 				const bool is_spanpos =
-					(st0 == TIMESPAN_DRAG) &&
+					(state->header.drag_state == TIMESPAN_PAINT) &&
 					(
-					((state.timespan_select_mode == SELECT_BAR) && tickpos == 0) ||
-					(state.timespan_select_mode == SELECT_TICK)
+					((state->timespan_select_mode == SELECT_BAR) && tickpos == 0) ||
+					(state->timespan_select_mode == SELECT_TICK)
 					);
 				if (is_spanpos && last_spanbx <= mx && mx < bx) {
 					if (reset_selected_timespan) {
-						state.selected_timespan.start = last_spanpos;
-						state.selected_timespan.end = pos;
-					} else if (st0 == TIMESPAN_DRAG) {
-						if (last_spanpos < state.selected_timespan.start) {
-							state.selected_timespan.start = last_spanpos;
+						state->selected_timespan.start = last_spanpos;
+						state->selected_timespan.end = pos;
+					} else if (state->header.drag_state == TIMESPAN_PAINT) {
+						if (last_spanpos < state->selected_timespan.start) {
+							state->selected_timespan.start = last_spanpos;
 						}
-						if (pos > state.selected_timespan.end) {
-							state.selected_timespan.end = pos;
+						if (pos > state->selected_timespan.end) {
+							state->selected_timespan.end = pos;
 						}
 					}
 				}
@@ -1364,7 +1395,7 @@ static void g_header(void)
 				}
 
 				const int flog2 = -(denominator_log2-2);
-				const float tick_dx = state.beat_dx * powf(2.0, flog2);
+				const float tick_dx = state->beat_dx * powf(2.0, flog2);
 				const bool print_per_beat = tick_dx > reserve.x;
 
 				const bool print = bz || print_per_beat;
@@ -1419,38 +1450,138 @@ static void g_header(void)
 		}
 	}
 
-	hover_row_index = new_hover_row_index;
+	state->header.hover_row_index = new_hover_row_index;
 }
 
-static void g_root(void)
+static void g_edit(void)
 {
 	g_header();
 }
 
+static void g_root(void)
+{
+	struct state* st = curstate();
+	switch (st->mode0) {
+	case MODE0_EDIT:
+		g_edit();
+		break;
+	default:
+		ImGui::Text("TODO implement mode0=%d", st->mode0);
+		break;
+	}
+}
+
+static struct state* new_state(void)
+{
+	struct state* st = arraddnptr(g.state_arr, 1);
+	*st = state();
+	return st;
+}
+
+ImFontAtlas* shared_font_atlas = NULL;
+static void state_common_init(struct state* st, int mode0)
+{
+	st->window = SDL_CreateWindow(
+		"MiiD",
+		SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+		1920, 1080,
+		SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI);
+	assert(st->window != NULL);
+
+	st->glctx = SDL_GL_CreateContext(st->window);
+	assert(st->glctx);
+
+	st->imctx = ImGui::CreateContext(shared_font_atlas);
+	ImGui::SetCurrentContext(st->imctx);
+	ImGuiIO& io = ImGui::GetIO();
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+	ImGui::StyleColorsDark();
+	ImGui_ImplSDL2_InitForOpenGL(st->window, st->glctx);
+	ImGui_ImplOpenGL2_Init();
+	if (shared_font_atlas == NULL) {
+		shared_font_atlas = io.Fonts;
+		char* MIID_TTF = getenv("MIID_TTF");
+		for (int i = 0; i < ARRAY_LENGTH(font_sizes); i++) {
+			const float sz = getsz(font_sizes[i]);
+			if (MIID_TTF != NULL && strlen(MIID_TTF) > 0) {
+				g.fonts[i] = shared_font_atlas->AddFontFromFileTTF(MIID_TTF, sz);
+			} else {
+				#ifdef C_TTF
+				g.fonts[i] = shared_font_atlas->AddFontFromFileTTF(C_TTF, sz);
+				#else
+				g.fonts[i] = shared_font_atlas->AddFontFromMemoryTTF(font_ttf, font_ttf_len, sz);
+				#endif
+			}
+		}
+		shared_font_atlas->Build();
+	}
+
+	st->mode0 = mode0;
+}
+
+static int push_state_from_mid_blob(struct blob blob)
+{
+	struct state* st = new_state();
+	st->myd = mid_unmarshal_blob(blob);
+	if (st->myd == NULL) {
+		return 0;
+	}
+	state_common_init(st, MODE0_EDIT);
+
+	#if 1
+	// XXX remove me eventually. currently it's pretty cool though
+	uint8_t* out_arr = mid_marshal_arr(st->myd);
+	write_file_from_arr(out_arr, "_.mid");
+	#endif
+	return st->myd != NULL;
+}
+
+static Uint32 get_event_window_id(SDL_Event* e)
+{
+	switch (e->type) {
+	case SDL_WINDOWEVENT:
+		return e->window.windowID;
+	case SDL_KEYDOWN:
+	case SDL_KEYUP:
+		return e->key.windowID;
+	case SDL_TEXTEDITING:
+		return e->edit.windowID;
+	case SDL_TEXTINPUT:
+		return e->text.windowID;
+	case SDL_MOUSEMOTION:
+		return e->motion.windowID;
+	case SDL_MOUSEBUTTONDOWN:
+	case SDL_MOUSEBUTTONUP:
+		return e->button.windowID;
+	case SDL_MOUSEWHEEL:
+		return e->wheel.windowID;
+	case SDL_FINGERMOTION:
+	case SDL_FINGERDOWN:
+	case SDL_FINGERUP:
+		return e->tfinger.windowID;
+	case SDL_DROPBEGIN:
+	case SDL_DROPFILE:
+	case SDL_DROPTEXT:
+	case SDL_DROPCOMPLETE:
+		return e->drop.windowID;
+	default:
+		if (SDL_USEREVENT <= e->type && e->type < SDL_LASTEVENT) {
+			return e->user.windowID;
+		}
+		return -1;
+	}
+	assert(!"UNREACHABLE");
+}
+
 int main(int argc, char** argv)
 {
-	if (argc != 2) {
-		fprintf(stderr, "Usage: %s <path/to/song.mid>\n", argv[0]);
-		exit(EXIT_FAILURE);
-	}
+	assert(SDL_Init(SDL_INIT_TIMER | (g.using_audio?SDL_INIT_AUDIO:0) | SDL_INIT_VIDEO) == 0);
+	atexit(SDL_Quit);
 
-	char* mid_path = argv[1];
-
-	struct blob mid_blob = blob_load(mid_path);
-	if (mid_blob.data == NULL) {
-		assert(!"TODO create midi file");
-	}
-
-	state.myd = mid_unmarshal_blob(mid_blob);
-	uint8_t* out_arr = mid_marshal_arr(state.myd);
-	arr_write_file(out_arr, "_.mid");
-
-	char* MIID_SF2 = getenv("MIID_SF2");
-	if (MIID_SF2 == NULL || strlen(MIID_SF2) == 0) {
-		fprintf(stderr, "WARNING: disabling audio because MIID_SF2 is not set (should contain colon-separated list of paths to SoundFonts)\n");
-	} else {
-		g.using_audio = 1;
-	}
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 1);
 
 	char* MIID_SZ = getenv("MIID_SZ");
 	if (MIID_SZ != NULL && strlen(MIID_SZ) > 0) {
@@ -1467,48 +1598,28 @@ int main(int argc, char** argv)
 		if (g.config_size1 < MIN_CONFIG_SIZE1) g.config_size1 = MIN_CONFIG_SIZE1;
 	}
 
-	assert(SDL_Init(SDL_INIT_TIMER | (g.using_audio?SDL_INIT_AUDIO:0) | SDL_INIT_VIDEO) == 0);
-	atexit(SDL_Quit);
-
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 1);
-
-	g.window = SDL_CreateWindow(
-		"MiiD",
-		SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-		1920, 1080,
-		SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI);
-	assert(g.window != NULL);
-
-	SDL_GLContext glctx = SDL_GL_CreateContext(g.window);
-	assert(glctx);
-
 	IMGUI_CHECKVERSION();
-	ImGui::CreateContext();
-	ImGuiIO& io = ImGui::GetIO();
-	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-	ImGui::StyleColorsDark();
 
-	ImGui_ImplSDL2_InitForOpenGL(g.window, glctx);
-	ImGui_ImplOpenGL2_Init();
+	if (argc == 1) {
+		assert(!"TODO gui prompt");
+	} else {
+		for (int ai = 1; ai < argc; ai++) {
+			char* mid_path = argv[ai];
+			struct blob mid_blob = blob_load(mid_path);
+			if (mid_blob.data == NULL) exit(EXIT_FAILURE);
 
-	{
-		char* MIID_TTF = getenv("MIID_TTF");
-		for (int i = 0; i < ARRAY_LENGTH(font_sizes); i++) {
-			const float sz = getsz(font_sizes[i]);
-			if (MIID_TTF != NULL && strlen(MIID_TTF) > 0) {
-				g.fonts[i] = io.Fonts->AddFontFromFileTTF(MIID_TTF, sz);
-			} else {
-				#ifdef C_TTF
-				g.fonts[i] = io.Fonts->AddFontFromFileTTF(C_TTF, sz);
-				#else
-				g.fonts[i] = io.Fonts->AddFontFromMemoryTTF(font_ttf, font_ttf_len, sz);
-				#endif
+			if (!push_state_from_mid_blob(mid_blob)) {
+				fprintf(stderr, "ERROR: %s: bad MIDI file\n", mid_path);
+				exit(EXIT_FAILURE);
 			}
 		}
-		io.Fonts->Build();
+	}
+
+	char* MIID_SF2 = getenv("MIID_SF2");
+	if (MIID_SF2 == NULL || strlen(MIID_SF2) == 0) {
+		fprintf(stderr, "WARNING: disabling audio because MIID_SF2 is not set (should contain colon-separated list of paths to SoundFonts)\n");
+	} else {
+		g.using_audio = 1;
 	}
 
 	if (g.using_audio) {
@@ -1545,7 +1656,7 @@ int main(int argc, char** argv)
 		}
 		free(cp);
 
-		state.current_soundfont_index = 0;
+		g.current_soundfont_index = 0;
 		refresh_soundfont();
 
 		SDL_PauseAudioDevice(g.audio_device, 0);
@@ -1553,46 +1664,60 @@ int main(int argc, char** argv)
 
 	int exiting = 0;
 	while (!exiting) {
+		const int n_states = arrlen(g.state_arr);
 		SDL_Event e;
 		while (SDL_PollEvent(&e)) {
 			if ((e.type == SDL_QUIT) || (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_CLOSE)) {
 				exiting = 1;
 			}
-			ImGui_ImplSDL2_ProcessEvent(&e);
+			Uint32 window_id = get_event_window_id(&e);
+			for (int i = 0; i < n_states; i++) {
+				struct state* st = &g.state_arr[i];
+				if (SDL_GetWindowID(st->window) != window_id) continue;
+				ImGui::SetCurrentContext(st->imctx);
+				ImGui_ImplSDL2_ProcessEvent(&e);
+				break;
+			}
 		}
 
-		ImGui_ImplOpenGL2_NewFrame();
-		ImGui_ImplSDL2_NewFrame();
-		ImGui::NewFrame();
+		for (int i = 0; i < n_states; i++) {
+			struct state* st = g.curstate = &g.state_arr[i];
 
-		if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-			exiting = 1;
-		}
+			SDL_GL_MakeCurrent(st->window, st->glctx);
+			ImGui::SetCurrentContext(st->imctx);
 
-		const ImGuiWindowFlags root_window_flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground;
-		ImGui::SetNextWindowPos(ImVec2(0,0));
-		ImGui::SetNextWindowSize(io.DisplaySize);
-		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0,0));
-		if (ImGui::Begin("root", NULL, root_window_flags)) {
-			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImGuiStyle().WindowPadding);
-			ImGui::PushFont(g.fonts[0]);
-			g_root();
-			ImGui::PopFont();
+			ImGuiIO& io = ImGui::GetIO();
+
+			ImGui_ImplOpenGL2_NewFrame();
+			ImGui_ImplSDL2_NewFrame();
+			ImGui::NewFrame();
+
+			if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+				exiting = 1;
+			}
+
+			const ImGuiWindowFlags root_window_flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground;
+			ImGui::SetNextWindowPos(ImVec2(0,0));
+			ImGui::SetNextWindowSize(io.DisplaySize);
+			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0,0));
+			if (ImGui::Begin("root", NULL, root_window_flags)) {
+				ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImGuiStyle().WindowPadding);
+				ImGui::PushFont(g.fonts[0]);
+				g_root();
+				ImGui::PopFont();
+				ImGui::PopStyleVar();
+				ImGui::End();
+			}
 			ImGui::PopStyleVar();
-			ImGui::End();
+
+			ImGui::Render();
+			glViewport(0, 0, (int)io.DisplaySize.x, (int)io.DisplaySize.y);
+			glClearColor(0, 0, 0, 0);
+			glClear(GL_COLOR_BUFFER_BIT);
+			ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
+			SDL_GL_SwapWindow(st->window);
 		}
-		ImGui::PopStyleVar();
-
-		ImGui::Render();
-		glViewport(0, 0, (int)io.DisplaySize.x, (int)io.DisplaySize.y);
-		glClearColor(0, 0, 0, 0);
-		glClear(GL_COLOR_BUFFER_BIT);
-		ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
-		SDL_GL_SwapWindow(g.window);
 	}
-
-	SDL_GL_DeleteContext(glctx);
-	SDL_DestroyWindow(g.window);
 
 	return EXIT_SUCCESS;
 }
