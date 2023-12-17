@@ -1014,7 +1014,12 @@ static void g_header(void)
 			ImGui::TableSetColumnIndex(0);
 			{
 				if (row_index == 0) {
-					ToggleButton("Ts", &show_tracks, C_TRACKS_ROW_TOGGLE_COLOR);
+					if (ImGui::Button("Play")) {
+					}
+					ImGui::SameLine();
+					if (ImGui::Button("Loop")) {
+					}
+					ToggleButton("T", &show_tracks, C_TRACKS_ROW_TOGGLE_COLOR);
 					ImGui::SetItemTooltip("Toggle track rows visibility");
 
 					ImGui::SameLine();
@@ -1040,7 +1045,7 @@ static void g_header(void)
 					ImGui::SetItemTooltip("Timespan selection mode");
 
 					ImGui::SameLine();
-					if (ImGui::Button("M")) {
+					if (ImGui::Button("Menu")) {
 						do_open_menu = true;
 					}
 				} else {
@@ -1080,11 +1085,10 @@ static void g_header(void)
 			ImGui::PopID();
 		}
 
+		ImGui::EndTable();
 
 		assert(n_rows < ARRAY_LENGTH(layout_y0s));
-		layout_y0s[n_rows] = ImGui::GetCursorScreenPos().y;
-
-		ImGui::EndTable();
+		layout_y0s[n_rows] = ImGui::GetCursorScreenPos().y - 4;
 
 		if (do_open_menu) {
 			ImGui::OpenPopup("menu");
@@ -1092,6 +1096,10 @@ static void g_header(void)
 		if (ImGui::BeginPopup("menu")) {
 			ImGui::SeparatorText("Menu");
 			ImGui::InputText("Title", mid->text, TEXT_FIELD_SIZE);
+			if (ImGui::InputInt("Division", &mid->division)) {
+				if (mid->division < 1) mid->division = 1;
+				if (mid->division > 0x7fff) mid->division = 0x7fff;
+			}
 			ImGui::EndPopup();
 		}
 
