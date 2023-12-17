@@ -975,7 +975,8 @@ static void g_header(void)
 	int new_hover_row_index = -1;
 	bool reset_selected_timespan = false;
 	int do_popup_editing_track_index = -1;
-	bool do_open_menu = false;
+	bool do_open_op_popup = false;
+	bool do_open_song_popup = false;
 	if (ImGui::BeginTable("top", n_columns, table_flags)) {
 		ImGui::TableSetupColumn("ctrl",     ImGuiTableColumnFlags_WidthFixed);
 		ImGui::TableSetupColumn("timeline", ImGuiTableColumnFlags_WidthStretch);
@@ -1045,9 +1046,9 @@ static void g_header(void)
 					ImGui::SetItemTooltip("Timespan selection mode");
 
 					ImGui::SameLine();
-					if (ImGui::Button("Menu")) {
-						do_open_menu = true;
-					}
+					if (ImGui::Button("Op")) do_open_op_popup = true;
+					ImGui::SameLine();
+					if (ImGui::Button("Song")) do_open_song_popup = true;
 				} else {
 					const int track_index = row_index - 1;
 					struct trk* trk = &tracks[track_index];
@@ -1090,11 +1091,25 @@ static void g_header(void)
 		assert(n_rows < ARRAY_LENGTH(layout_y0s));
 		layout_y0s[n_rows] = ImGui::GetCursorScreenPos().y - 4;
 
-		if (do_open_menu) {
-			ImGui::OpenPopup("menu");
+		if (do_open_op_popup) {
+			ImGui::OpenPopup("op_popup");
 		}
-		if (ImGui::BeginPopup("menu")) {
-			ImGui::SeparatorText("Menu");
+		if (ImGui::BeginPopup("op_popup")) {
+			ImGui::SeparatorText("Operations");
+			ImGui::TextUnformatted("TODO: set tempo"); // TODO
+			ImGui::TextUnformatted("TODO: set time signature"); // TODO
+			ImGui::TextUnformatted("TODO: delete range"); // TODO
+			ImGui::TextUnformatted("TODO: duplicate range"); // TODO
+			ImGui::TextUnformatted("TODO: velocity range operations"); // TODO
+			ImGui::TextUnformatted("TODO: delete pitch bend / CC in range"); // TODO
+			ImGui::EndPopup();
+		}
+
+		if (do_open_song_popup) {
+			ImGui::OpenPopup("song_popup");
+		}
+		if (ImGui::BeginPopup("song_popup")) {
+			ImGui::SeparatorText("Song");
 			ImGui::InputText("Title", mid->text, TEXT_FIELD_SIZE);
 			if (ImGui::InputInt("Division", &mid->division)) {
 				if (mid->division < 1) mid->division = 1;
