@@ -954,6 +954,7 @@ static void g_header(void)
 	static int st0 = IDLE;
 	static float pan_last_x = 0;
 	static int hover_row_index = -1;
+	static int popup_editing_track_index = 0;
 
 	float layout_y0s[1<<8];
 	float layout_x1 = 0;
@@ -966,6 +967,7 @@ static void g_header(void)
 	const float table_width = ImGui::GetContentRegionAvail().x;
 	int new_hover_row_index = -1;
 	bool reset_selected_timespan = false;
+	int do_popup_editing_track_index = -1;
 	if (ImGui::BeginTable("top", n_columns, table_flags)) {
 		ImGui::TableSetupColumn("ctrl",     ImGuiTableColumnFlags_WidthFixed);
 		ImGui::TableSetupColumn("timeline", ImGuiTableColumnFlags_WidthStretch);
@@ -974,6 +976,8 @@ static void g_header(void)
 		const int n_tracks = arrlen(mid->trk_arr) - 1;
 		struct trk* tracks = &mid->trk_arr[1];
 		const int n_rows = 1 + (show_tracks ? n_tracks : 0);
+
+		bool try_track_select = false;
 
 		for (int row_index = 0; row_index < n_rows; row_index++) {
 			const float row_height = row_index == 0 ? getsz(1.5) : getsz(1.0);
@@ -1039,8 +1043,18 @@ static void g_header(void)
 						trk->name != NULL ? trk->name : "n/a",
 						trk->midi_channel+1);
 
+					const ImVec2 save = ImGui::GetCursorPos();
 					ImGui::TextUnformatted(label);
-					//track_toggle(track_index);
+					ImGui::SetCursorPos(save);
+					const ImVec2 sz = ImVec2(ImGui::GetColumnWidth(), getsz(1));
+					ImGui::InvisibleButton("table_header", sz, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+					if (ImGui::IsItemHovered()) {
+						if (ImGui::IsMouseClicked(0)) {
+							try_track_select = true;
+						} else if (ImGui::IsMouseClicked(1)) {
+							do_popup_editing_track_index = track_index;
+						}
+					}
 				}
 			}
 
@@ -1058,10 +1072,23 @@ static void g_header(void)
 			ImGui::PopID();
 		}
 
+
 		assert(n_rows < ARRAY_LENGTH(layout_y0s));
 		layout_y0s[n_rows] = ImGui::GetCursorScreenPos().y;
 
 		ImGui::EndTable();
+
+		if (do_popup_editing_track_index >= 0) {
+			popup_editing_track_index = do_popup_editing_track_index;
+			ImGui::OpenPopup("track_edit_popup");
+		}
+		if (ImGui::BeginPopup("track_edit_popup")) {
+			struct trk* trk = &tracks[popup_editing_track_index];
+			ImGui::SeparatorText("Hello Track Edit");
+			ImGui::Button("ding");
+			ImGui::Text("track \"%s\" ch%d", trk->name != NULL ? trk->name : "n/a", trk->midi_channel);
+			ImGui::EndPopup();
+		}
 
 		const float mx = io.MousePos.x - layout_x1;
 		const float mu = (float)((mx - state.beat0_x) * mid->division) / state.beat_dx;
@@ -1086,6 +1113,8 @@ static void g_header(void)
 				if (layout_y0s[0] <= my && my < layout_y0s[1]) {
 					st0 = TIMESPAN_DRAG;
 					reset_selected_timespan = true;
+				} else {
+					try_track_select = true;
 				}
 			} else if (click_rmb) {
 				st0 = PAN_DRAG;
@@ -1128,11 +1157,8 @@ static void g_header(void)
 			if (ImGui::IsMouseHoveringRect(p0, p2) && ImGui::GetMouseCursor() == ImGuiMouseCursor_Arrow) {
 				new_hover_row_index = i;
 				const int track_index = i-1;
-				if (ImGui::IsMouseClicked(0)) {
+				if (try_track_select) {
 					track_toggle(track_index);
-				}
-				if (ImGui::IsMouseClicked(1) && ImGui::IsMouseHoveringRect(p0, p1)) {
-					printf("TODO popup for track %d\n", track_index);
 				}
 				break;
 			}
@@ -1479,9 +1505,11 @@ int main(int argc, char** argv)
 		ImGui::SetNextWindowSize(io.DisplaySize);
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0,0));
 		if (ImGui::Begin("root", NULL, root_window_flags)) {
+			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImGuiStyle().WindowPadding);
 			ImGui::PushFont(g.fonts[0]);
 			g_root();
 			ImGui::PopFont();
+			ImGui::PopStyleVar();
 			ImGui::End();
 		}
 		ImGui::PopStyleVar();
