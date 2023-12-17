@@ -11,8 +11,10 @@
 //   #define C_TTF "/usr/share/fonts/truetype/..."
 
 #define C_DEFAULT_BEAT_WIDTH_PX (24)
+#define C_DEFAULT_KEY_HEIGHT_PX (12)
 
 #define C_TIMELINE_ZOOM_SENSITIVITY (1.05)
+#define C_KEY_ZOOM_SENSITIVITY      (1.05)
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -43,6 +45,11 @@
 
 #define C_TIMESPAN_TOP_COLOR  RGB(0x554400)
 #define C_TIMESPAN_DIM_COLOR  RGBA(0x55440040)
+
+#define C_WHITE_KEYS_COLOR         RGB(0x444444)
+#define C_BLACK_KEYS_COLOR         RGB(0x333333)
+#define C_WHITE_PIANOROLL_COLOR    RGB(0x161616)
+#define C_BLACK_PIANOROLL_COLOR    RGB(0x101010)
 
 #define CONFIG_H
 #endif

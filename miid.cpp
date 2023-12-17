@@ -230,6 +230,14 @@ struct state {
 		float pan_last_x;
 		int popup_editing_track_index;
 	} header;
+
+	struct {
+		int drag_state;
+		float pan_last_y;
+	} pianoroll;
+
+	float key127_y;
+	float key_dy = C_DEFAULT_KEY_HEIGHT_PX;
 };
 
 
@@ -704,8 +712,8 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 	// and it makes it easier to use the data as-is. it wouldn't be hard to
 	// FIXME but I need a file that breaks this convention.
 	for (int i = 0; i < n_tracks; i++) {
-		int flags = trk_flags[i];
-		if ((flags & HAS_META) && (flags & HAS_META)) {
+		const int flags = trk_flags[i];
+		if ((flags & HAS_META) && (flags & HAS_MIDI)) {
 			// mixed track
 			fprintf(stderr, "ERROR: FIXME fixup not implemented (/1)\n");
 			return NULL;
@@ -1007,16 +1015,16 @@ static void g_header(void)
 	float layout_w1 = 0;
 
 	ImGuiIO& io = ImGui::GetIO();
-	const int n_columns = 2;
-	const ImGuiTableFlags table_flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersV;
 	const ImVec2 table_p0 = ImGui::GetCursorScreenPos();
-	const float table_width = ImGui::GetContentRegionAvail().x;
 	int new_hover_row_index = -1;
 	bool reset_selected_timespan = false;
 	int do_popup_editing_track_index = -1;
 	bool do_open_op_popup = false;
 	bool do_open_song_popup = false;
-	if (ImGui::BeginTable("top", n_columns, table_flags)) {
+	const float table_width = ImGui::GetContentRegionAvail().x;
+	const int n_columns = 2;
+	const ImGuiTableFlags table_flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersV;
+	if (ImGui::BeginTable("header", n_columns, table_flags)) {
 		ImGui::TableSetupColumn("ctrl",     ImGuiTableColumnFlags_WidthFixed);
 		ImGui::TableSetupColumn("timeline", ImGuiTableColumnFlags_WidthStretch);
 
@@ -1243,14 +1251,12 @@ static void g_header(void)
 
 			if (state->beat_dx == 0.0) state->beat_dx = C_DEFAULT_BEAT_WIDTH_PX;
 
-			if (is_hover && !is_drag) {
-				const float mw = io.MouseWheel;
-				if (mw != 0) {
-					const float zoom_scalar = powf(C_TIMELINE_ZOOM_SENSITIVITY, mw);
-					const float new_beat_dx = state->beat_dx * zoom_scalar;
-					state->beat0_x = -((mx - state->beat0_x) / state->beat_dx) * new_beat_dx + mx;
-					state->beat_dx = new_beat_dx;
-				}
+			const float mw = io.MouseWheel;
+			if (is_hover && !is_drag && mw != 0) {
+				const float zoom_scalar = powf(C_TIMELINE_ZOOM_SENSITIVITY, mw);
+				const float new_beat_dx = state->beat_dx * zoom_scalar;
+				state->beat0_x = -((mx - state->beat0_x) / state->beat_dx) * new_beat_dx + mx;
+				state->beat_dx = new_beat_dx;
 			}
 		}
 
@@ -1464,9 +1470,139 @@ static void g_header(void)
 	state->header.hover_row_index = new_hover_row_index;
 }
 
+static void g_pianoroll(void)
+{
+	struct state* st = curstate();
+	const int IDLE = 0, KEY_PAN = 1;
+
+	const ImVec2 avail = ImGui::GetContentRegionAvail();
+	const float table_height = avail.y - 4 - ImGui::GetFrameHeightWithSpacing();
+	const int n_columns = 2;
+	const ImGuiTableFlags table_flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersV;
+	const ImVec2 table_p0 = ImGui::GetCursorScreenPos();
+	const ImVec2 table_p1 = ImVec2(table_p0.x + avail.x, table_p0.y + table_height);
+	if (ImGui::BeginTable("pianoroll", n_columns, table_flags)) {
+		//ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::GetColorU32(c));
+		ImGui::TableSetupColumn("keys",  ImGuiTableColumnFlags_WidthFixed);
+		ImGui::TableSetupColumn("notes", ImGuiTableColumnFlags_WidthStretch);
+		ImGui::TableNextRow();
+
+		const char* KEYS = "_#_#__#_#_#_";
+		assert(strlen(KEYS) == 12);
+		//const int C4 = 60;
+
+		ImGuiIO& io = ImGui::GetIO();
+
+		float w0 = 0, w1 = 0;
+		ImGui::TableSetColumnIndex(0);
+		{
+			w0 = ImGui::GetColumnWidth();
+			const ImVec2 sz(w0, table_height);
+			ImGui::InvisibleButton("keys", sz, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+			ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY); // grab mouse wheel
+			const bool is_drag = ImGui::IsItemActive();
+			const bool is_hover = ImGui::IsItemHovered();
+			const bool click_lmb = is_hover && ImGui::IsMouseClicked(0);
+			const bool click_rmb = is_hover && ImGui::IsMouseClicked(1);
+			const float mw = io.MouseWheel;
+			const float my = io.MousePos.y - table_p0.y;
+			if (click_rmb) {
+				st->pianoroll.drag_state = KEY_PAN;
+				st->pianoroll.pan_last_y = 0;
+			}
+			if (is_hover && !is_drag && mw != 0) {
+				const float zoom_scalar = powf(C_KEY_ZOOM_SENSITIVITY, mw);
+				const float new_key_dy = st->key_dy * zoom_scalar;
+				st->key127_y = -((my - st->key127_y) / st->key_dy) * new_key_dy + my;
+				st->key_dy = new_key_dy;
+			}
+			if (!is_drag && st->pianoroll.drag_state > IDLE) {
+				st->pianoroll.drag_state = IDLE;
+			} else if (st->pianoroll.drag_state == KEY_PAN) {
+				const float y = ImGui::GetMouseDragDelta(1).y;
+				const float dy = y - st->pianoroll.pan_last_y;
+				st->key127_y += dy;
+				st->pianoroll.pan_last_y = y;
+			}
+		}
+
+		ImGui::TableSetColumnIndex(1);
+		{
+			w1 = ImGui::GetColumnWidth();
+			const ImVec2 sz(w1, table_height);
+			ImGui::InvisibleButton("pianoroll", sz, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+			ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY); // grab mouse wheel
+			//const bool is_drag = ImGui::IsItemActive();
+			//const bool is_hover = ImGui::IsItemHovered();
+		}
+
+		ImGui::EndTable();
+
+		ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+		{
+			draw_list->PushClipRect(table_p0, table_p1);
+
+			const float key_size = st->key_dy;
+
+			for (int col = 0; col < 2; col++) {
+				float x0=0,x1=0;
+				ImU32 black, white;
+				if (col == 0) {
+					x0 = table_p0.x;
+					x1 = x0 + w0;
+					black = ImGui::GetColorU32(C_BLACK_KEYS_COLOR);
+					white = ImGui::GetColorU32(C_WHITE_KEYS_COLOR);
+				} else if (col == 1) {
+					const float m = 20;
+					x0 = table_p0.x + w0 + m;
+					x1 = x0 + w1 - m;
+					black = ImGui::GetColorU32(C_BLACK_PIANOROLL_COLOR);
+					white = ImGui::GetColorU32(C_WHITE_PIANOROLL_COLOR);
+				} else {
+					assert(!"UNREACHABLE");
+				}
+
+				const float y0 = table_p0.y + st->key127_y;
+				draw_list->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y0 + 128*key_size), white);
+
+				float y = y0;
+				char prev_key = 0;
+				for (int note = 127; note >= 0; note--, y += key_size) {
+					char key = KEYS[note % 12];
+					if (key == '#') {
+						const float y0 = y;
+						const float y1 = y + key_size;
+						draw_list->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), black);
+					}
+					if (key == prev_key) {
+						const float y0 = y - 0.5;
+						const float y1 = y + 0.5;
+						draw_list->AddRectFilled( ImVec2(x0, y0), ImVec2(x1, y1), black);
+					}
+					prev_key = key;
+				}
+			}
+
+			draw_list->PopClipRect();
+		}
+	}
+
+	// toolbar
+	if (ImGui::Button("Tool0")) {
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Tool1")) {
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Tool2")) {
+	}
+}
+
 static void g_edit(void)
 {
 	g_header();
+	g_pianoroll();
 }
 
 static struct mid* mid_new(void)
