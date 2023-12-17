@@ -99,8 +99,8 @@ struct trk {
 	int midi_channel;
 	char* name;
 	struct mev* mev_arr;
-	int has_meta;
-	int has_midi;
+	bool has_meta;
+	bool has_midi;
 };
 
 
@@ -203,8 +203,8 @@ enum {
 
 enum {
 	MODE0_EDIT,      // normal edit mode
-	MODE0_ASK,       // no argv; [New Song] [Load Song] [Exit]?
-	MODE0_NEW,       // song foo.mid does not exist; [Create It] [Exit]?
+	MODE0_BLANK,     // no argv; [New Song] [Load Song] [Exit]?
+	MODE0_CREATE,    // song foo.mid does not exist; [Create It] [Exit]?
 	MODE0_LOAD,      // "load song" dialog
 	MODE0_SAVE,      // "save song as" dialog
 	MODE0_DO_CLOSE,  // window is closing
@@ -215,6 +215,7 @@ struct state {
 	SDL_Window* window;
 	SDL_GLContext glctx;
 	ImGuiContext* imctx;
+	char* path;
 	struct mid* myd;
 	struct medit* medit_arr;
 	union timespan selected_timespan;
@@ -586,7 +587,7 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 					for (int i = 0; i < write_nmeta; i++) {
 						mev.b[i+1] = data[i];
 					}
-					trk->has_meta = 1;
+					trk->has_meta = true;
 					emit_mev = 1;
 				}
 			} else if (h0 == NOTE_OFF) {
@@ -626,7 +627,7 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 					}
 					mev.b[i+1] = v;
 				}
-				trk->has_midi = 1;
+				trk->has_midi = true;
 				emit_mev = 1;
 				#if 0
 				if (h0 == PROGRAM_CHANGE) {
@@ -1459,12 +1460,53 @@ static void g_edit(void)
 	g_header();
 }
 
+static struct mid* mid_new(void)
+{
+	struct mid* m = new mid();
+	m->text = alloc_text_field();
+	strncpy(m->text, "TODO your song title", TEXT_FIELD_SIZE);
+	m->division = 480;
+	struct trk* trk = arraddnptr(m->trk_arr, 1);
+	memset(trk, 0, sizeof *trk);
+	trk->midi_channel = -1;
+	trk->name = alloc_text_field();
+	trk->has_meta = true;
+	return m;
+}
+
+static void state_new_song(struct state* st)
+{
+	assert((st->myd == NULL) && "is myd free()'d? why is it not NULL?");
+	st->myd = mid_new();
+	st->mode0 = MODE0_EDIT;
+}
+
 static void g_root(void)
 {
 	struct state* st = curstate();
 	switch (st->mode0) {
 	case MODE0_EDIT:
 		g_edit();
+		break;
+	case MODE0_BLANK:
+		if (ImGui::Button("Create New Song")) {
+			state_new_song(st);
+		}
+		if (ImGui::Button("Load Song")) {
+			st->mode0 = MODE0_LOAD;
+		}
+		if (ImGui::Button("Exit")) {
+			st->mode0 = MODE0_DO_CLOSE;
+		}
+		break;
+	case MODE0_CREATE:
+		ImGui::Text("%s: file does not exist", st->path);
+		if (ImGui::Button("OK, Create It")) {
+			state_new_song(st);
+		}
+		if (ImGui::Button("Exit")) {
+			st->mode0 = MODE0_DO_CLOSE;
+		}
 		break;
 	default:
 		ImGui::Text("TODO implement mode0=%d", st->mode0);
@@ -1476,6 +1518,7 @@ static struct state* new_state(void)
 {
 	struct state* st = arraddnptr(g.state_arr, 1);
 	*st = state();
+	st->path = alloc_text_field();
 	return st;
 }
 
@@ -1523,21 +1566,33 @@ static void state_common_init(struct state* st, int mode0)
 	st->mode0 = mode0;
 }
 
-static int push_state_from_mid_blob(struct blob blob)
+static void push_state_blank(void)
+{
+	struct state* st = new_state();
+	state_common_init(st, MODE0_BLANK);
+}
+
+static void push_state_create(const char* path)
+{
+	struct state* st = new_state();
+	strncpy(st->path, path, TEXT_FIELD_SIZE);
+	state_common_init(st, MODE0_CREATE);
+}
+
+static bool push_state_from_mid_blob(struct blob blob)
 {
 	struct state* st = new_state();
 	st->myd = mid_unmarshal_blob(blob);
 	if (st->myd == NULL) {
-		return 0;
+		return false;
 	}
 	state_common_init(st, MODE0_EDIT);
-
 	#if 1
 	// XXX remove me eventually. currently it's pretty cool though
 	uint8_t* out_arr = mid_marshal_arr(st->myd);
 	write_file_from_arr(out_arr, "_.mid");
 	#endif
-	return st->myd != NULL;
+	return true;
 }
 
 static Uint32 get_event_window_id(SDL_Event* e)
@@ -1605,16 +1660,18 @@ int main(int argc, char** argv)
 	IMGUI_CHECKVERSION();
 
 	if (argc == 1) {
-		assert(!"TODO gui prompt");
+		push_state_blank();
 	} else {
 		for (int ai = 1; ai < argc; ai++) {
 			char* mid_path = argv[ai];
 			struct blob mid_blob = blob_load(mid_path);
-			if (mid_blob.data == NULL) exit(EXIT_FAILURE);
-
-			if (!push_state_from_mid_blob(mid_blob)) {
-				fprintf(stderr, "ERROR: %s: bad MIDI file\n", mid_path);
-				exit(EXIT_FAILURE);
+			if (mid_blob.data == NULL) {
+				push_state_create(mid_path);
+			} else {
+				if (!push_state_from_mid_blob(mid_blob)) {
+					fprintf(stderr, "ERROR: %s: bad MIDI file\n", mid_path);
+					exit(EXIT_FAILURE);
+				}
 			}
 		}
 	}
