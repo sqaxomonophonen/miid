@@ -218,6 +218,8 @@ struct state {
 	float beat_dx;
 	bool bar_select;
 	int timespan_select_mode = SELECT_BAR;
+	bool track_select_set[1<<8];
+	int primary_track_select = -1;
 } state;
 
 static void refresh_soundfont(void)
@@ -899,288 +901,435 @@ static inline int dshift(int v, int shift)
 	assert(!"UNREACHABLE");
 }
 
-
-static void g_timeline(void)
+ImVec4 color_scale(ImVec4 c, float s)
 {
-	const int IDLE=0, LEFT_DRAG=1, RIGHT_DRAG=2;
+	return ImVec4(c.x*s, c.y*s, c.z*s, c.w);
+}
 
-	// local globals!
-	static float hover_factor = 0.0f;
+ImVec4 color_brighten(ImVec4 c, float s)
+{
+	return ImVec4(c.x+s, c.y+s, c.z+s, c.w);
+}
+
+ImVec4 color_add(ImVec4 a, ImVec4 b)
+{
+	return ImVec4(a.x+b.x, a.y+b.y, a.z+b.z, a.w+b.w);
+}
+
+static void track_toggle(int index)
+{
+	struct mid* mid = state.myd;
+	if (mid == NULL) return;
+	const int n = arrlen(mid->trk_arr);
+	if (!(0 <= index && index < n)) return;
+	if (index >= ARRAY_LENGTH(state.track_select_set)) return;
+	if (state.track_select_set[index]) {
+		state.track_select_set[index] = false;
+		if (index == state.primary_track_select) {
+			state.primary_track_select = -1;
+		}
+	} else {
+		state.primary_track_select = index;
+		state.track_select_set[index] = true;
+	}
+}
+
+static void ToggleButton(const char* label, bool* p, ImVec4 color)
+{
+	ImVec4 base = *p ? color : color_scale(color, C_TOGGLE_BUTTON_OFF_SCALAR);
+	ImGui::PushStyleColor(ImGuiCol_Button, base);
+	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, color_brighten(base, C_TOGGLE_BUTTON_HOVER_BRIGHTEN));
+	ImGui::PushStyleColor(ImGuiCol_ButtonActive,  color_brighten(base, C_TOGGLE_BUTTON_ACTIVE_BRIGHTEN));
+	if (ImGui::Button(label)) {
+		*p = !*p;
+	}
+	ImGui::PopStyleColor(3);
+}
+
+static void g_header(void)
+{
+	const int IDLE=0, TIMESPAN_DRAG=1, PAN_DRAG=2;
+
+	static bool show_tracks = true; // FIXME does this belong in `state`?
 	static int st0 = IDLE;
 	static float pan_last_x = 0;
+	static int hover_row_index = -1;
 
-	ImGui::PushFont(g.fonts[1]);
+	float layout_y0s[1<<8];
+	float layout_x1 = 0;
+	float layout_w1 = 0;
 
-	struct mid* myd = state.myd;
 	ImGuiIO& io = ImGui::GetIO();
-	ImVec2 region = ImGui::GetContentRegionAvail();
-	const float w = region.x;
-	const float h = getsz(3);
-	const ImVec2 p0 = ImGui::GetCursorScreenPos();
-	const ImVec2 p1 = ImVec2(p0.x + w, p0.y + h);
-	const ImVec2 mpos = ImVec2(
-		io.MousePos.x - p0.x,
-		io.MousePos.y - p0.y);
-	const float mu = (float)((mpos.x - state.beat0_x) * myd->division) / state.beat_dx;
-
-	ImGui::InvisibleButton("##timeline", ImVec2(w, h), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
-	ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY); // grab mouse wheel
-
-	const bool is_drag = ImGui::IsItemActive();
-	const bool is_hover = ImGui::IsItemHovered();
-
-	const float dh = io.DeltaTime * (1.0 / 0.1);
-	hover_factor = ImMax(0.0f, ImMin(1.0f, hover_factor + ((is_hover || is_drag) ? dh : -dh)));
-
-	const bool click_lmb = is_hover && ImGui::IsMouseClicked(0);
-	const bool click_rmb = is_hover && ImGui::IsMouseClicked(1);
-
+	const int n_columns = 2;
+	const ImGuiTableFlags table_flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersV;
+	const ImVec2 table_p0 = ImGui::GetCursorScreenPos();
+	const float table_width = ImGui::GetContentRegionAvail().x;
+	int new_hover_row_index = -1;
 	bool reset_selected_timespan = false;
-	if (!is_drag && st0 > IDLE) {
-		st0 = IDLE;
-	} else if (click_lmb) {
-		st0 = LEFT_DRAG;
-		reset_selected_timespan = true;
-	} else if (click_rmb) {
-		st0 = RIGHT_DRAG;
-		pan_last_x = 0;
-	}
+	if (ImGui::BeginTable("top", n_columns, table_flags)) {
+		ImGui::TableSetupColumn("ctrl",     ImGuiTableColumnFlags_WidthFixed);
+		ImGui::TableSetupColumn("timeline", ImGuiTableColumnFlags_WidthStretch);
 
-	if (st0 == RIGHT_DRAG) {
-		const float x = ImGui::GetMouseDragDelta(1).x;
-		const float dx = x - pan_last_x;
-		if (dx != 0.0) {
-			state.beat0_x += dx;
-		}
-		pan_last_x = x;
-	}
+		struct mid* mid = state.myd;
+		const int n_tracks = arrlen(mid->trk_arr) - 1;
+		struct trk* tracks = &mid->trk_arr[1];
+		const int n_rows = 1 + (show_tracks ? n_tracks : 0);
 
-	if (state.beat_dx == 0.0) state.beat_dx = C_DEFAULT_BEAT_WIDTH_PX;
+		for (int row_index = 0; row_index < n_rows; row_index++) {
+			const float row_height = row_index == 0 ? getsz(1.5) : getsz(1.0);
 
-	if (is_hover && !is_drag) {
-		const float mw = io.MouseWheel;
-		if (mw != 0) {
-			const float zoom_scalar = powf(C_TIMELINE_ZOOM_SENSITIVITY, mw);
-			const float new_beat_dx = state.beat_dx * zoom_scalar;
-			state.beat0_x = -((mpos.x - state.beat0_x) / state.beat_dx) * new_beat_dx + mpos.x;
-			state.beat_dx = new_beat_dx;
-		}
-	}
+			ImGui::PushID(row_index);
 
-	ImDrawList* draw_list = ImGui::GetWindowDrawList();
+			ImGui::TableNextRow();
 
-	draw_list->AddRectFilled(p0, p1,
-		ImGui::GetColorU32(ImLerp(
-			ImVec4(0.2,  0.2,  0.2,  1),
-			ImVec4(0.1,  0.1,  0.5,  1),
-			hover_factor
-		))
-	);
+			assert(row_index < ARRAY_LENGTH(layout_y0s));
+			layout_y0s[row_index] = ImGui::GetCursorScreenPos().y;
 
-	{
-		float xs[2];
-		for (int i = 0; i < 2; i++) {
-			xs[i] = state.beat0_x + ((float)state.selected_timespan.s[i] / (float)myd->division) * state.beat_dx;
-		}
-		if (xs[1] != xs[0]) {
-			draw_list->AddRectFilled(
-				ImVec2(xs[0], p0.y),
-				ImVec2(xs[1], p1.y),
-				ImGui::GetColorU32(ImVec4(1, 1, 0, 0.2)));
-		}
-	}
+			if (row_index > 0) {
+				ImVec4 c = (row_index & 1) == 1 ? C_TRACK_ROW_EVEN_COLOR : C_TRACK_ROW_ODD_COLOR;
+				if (row_index == hover_row_index) {
+					c = color_add(c, C_TRACK_ROW_HOVER_ADD_COLOR);
+				}
+				const int track_index = row_index - 1;
+				if (track_index == state.primary_track_select) {
+					c = color_add(c, C_TRACK_ROW_PRIMARY_SELECTION_ADD_COLOR);
+				} else if (state.track_select_set[track_index]) {
+					c = color_add(c, C_TRACK_ROW_SECONDARY_SELECTION_ADD_COLOR);
+				}
+				ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::GetColorU32(c));
+			}
 
-	assert(arrlen(state.myd->trk_arr) > 0);
-	struct trk* timetrk = &state.myd->trk_arr[0];
-	const int n_timetrack_events = arrlen(timetrk->mev_arr);
-	const ImVec2 reserve = ImGui::CalcTextSize("0000.0");
-	int numerator = 4;
-	int denominator_log2 = 2;
-	float beats_per_minute = 120.0;
-	int ttpos = 0;
-	float bx = state.beat0_x;
-	const ImU32 tick0_color = ImGui::GetColorU32(ImVec4(1,1,1,1));
-	const ImU32 tick1_color = ImGui::GetColorU32(ImVec4(1,1,0,0.4));
-	const ImU32 bar_label_color = ImGui::GetColorU32(ImVec4(0,1,1,1.0));
-	const ImU32 beat_label_color = ImGui::GetColorU32(ImVec4(0,1,1,0.5));
-	const ImU32 signature_color = ImGui::GetColorU32(ImVec4(1,0.5,1,1));
-	int bar = 0;
-	int tick = 0;
-	int tickpos = 0;
-	int pos = 0;
-	int last_spanpos = 0;
-	float last_spanbx = bx;
+			ImGui::TableSetColumnIndex(0);
+			{
+				if (row_index == 0) {
+					ToggleButton("Ts", &show_tracks, C_TRACKS_ROW_TOGGLE_COLOR);
+					ImGui::SetItemTooltip("Toggle track rows visibility");
 
-	if (st0 == LEFT_DRAG && state.timespan_select_mode == SELECT_FINE) {
-		if (reset_selected_timespan) {
-			state.selected_timespan.start = mu;
-			state.selected_timespan.end = mu;
-		} else {
-			if (mu < state.selected_timespan.start) {
-				state.selected_timespan.start = mu;
-				if (state.selected_timespan.start < 0) {
-					state.selected_timespan.start = 0;
+					ImGui::SameLine();
+
+					const ImVec2 bsz = ImVec2(getsz(3),0);
+					switch (state.timespan_select_mode) {
+					case SELECT_BAR:
+						if (ImGui::Button("Bar", bsz)) {
+							state.timespan_select_mode = SELECT_TICK;
+						}
+						break;
+					case SELECT_TICK:
+						if (ImGui::Button("Tick", bsz)) {
+							state.timespan_select_mode = SELECT_FINE;
+						}
+						break;
+					case SELECT_FINE:
+						if (ImGui::Button("Fine", bsz)) {
+							state.timespan_select_mode = SELECT_BAR;
+						}
+						break;
+					}
+					ImGui::SetItemTooltip("Timespan selection mode");
+
+					ImGui::SameLine();
+					if (ImGui::Button("M")) {
+						printf("TODO M\n");
+					}
+				} else {
+					const int track_index = row_index - 1;
+					struct trk* trk = &tracks[track_index];
+					char label[1<<8];
+					snprintf(label, sizeof label, "%s (ch%d)",
+						trk->name != NULL ? trk->name : "n/a",
+						trk->midi_channel+1);
+
+					ImGui::TextUnformatted(label);
+					//track_toggle(track_index);
 				}
 			}
-			if (mu > state.selected_timespan.end) {
-				state.selected_timespan.end = mu;
-				if (state.selected_timespan.end > myd->end_of_song_pos) {
-					state.selected_timespan.start = myd->end_of_song_pos;
+
+			ImGui::TableSetColumnIndex(1);
+			{
+				const float p0x = ImGui::GetCursorScreenPos().x;
+				const float cell_width = ImGui::GetContentRegionAvail().x;
+				if (p0x > layout_x1) {
+					layout_x1 = p0x;
+					layout_w1 = cell_width;
+				}
+				ImGui::Dummy(ImVec2(cell_width, row_height));
+			}
+
+			ImGui::PopID();
+		}
+
+		assert(n_rows < ARRAY_LENGTH(layout_y0s));
+		layout_y0s[n_rows] = ImGui::GetCursorScreenPos().y;
+
+		ImGui::EndTable();
+
+		const float mx = io.MousePos.x - layout_x1;
+		const float mu = (float)((mx - state.beat0_x) * mid->division) / state.beat_dx;
+
+		{
+			ImGui::SetCursorPos(ImVec2(layout_x1, table_p0.y));
+			const ImVec2 sz = ImVec2(layout_w1, layout_y0s[n_rows] - layout_y0s[0]);
+
+			ImGui::InvisibleButton("timeline", sz, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+			ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY); // grab mouse wheel
+
+			const bool is_drag = ImGui::IsItemActive();
+			const bool is_hover = ImGui::IsItemHovered();
+
+			const bool click_lmb = is_hover && ImGui::IsMouseClicked(0);
+			const bool click_rmb = is_hover && ImGui::IsMouseClicked(1);
+
+			if (!is_drag && st0 > IDLE) {
+				st0 = IDLE;
+			} else if (click_lmb) {
+				const float my = io.MousePos.y;
+				if (layout_y0s[0] <= my && my < layout_y0s[1]) {
+					st0 = TIMESPAN_DRAG;
+					reset_selected_timespan = true;
+				}
+			} else if (click_rmb) {
+				st0 = PAN_DRAG;
+				pan_last_x = 0;
+			}
+
+			if (st0 == PAN_DRAG) {
+				const float x = ImGui::GetMouseDragDelta(1).x;
+				const float dx = x - pan_last_x;
+				if (dx != 0.0) {
+					state.beat0_x += dx;
+				}
+				pan_last_x = x;
+			}
+
+			if (state.beat_dx == 0.0) state.beat_dx = C_DEFAULT_BEAT_WIDTH_PX;
+
+			if (is_hover && !is_drag) {
+				const float mw = io.MouseWheel;
+				if (mw != 0) {
+					const float zoom_scalar = powf(C_TIMELINE_ZOOM_SENSITIVITY, mw);
+					const float new_beat_dx = state.beat_dx * zoom_scalar;
+					state.beat0_x = -((mx - state.beat0_x) / state.beat_dx) * new_beat_dx + mx;
+					state.beat_dx = new_beat_dx;
 				}
 			}
+		}
+
+		for (int i = 1; i < n_rows; i++) {
+			const float x0 = table_p0.x;
+			const float x1 = layout_x1;
+			const float x2 = x0 + table_width;
+			const float y0 = layout_y0s[i];
+			const float y1 = layout_y0s[i+1];
+			const ImVec2 p0 = ImVec2(x0, y0);
+			const ImVec2 p1 = ImVec2(x1, y1);
+			const ImVec2 p2 = ImVec2(x2, y1);
+			// HACK: checking mouse cursor shape to prevent
+			// selecting track when resizing column width
+			if (ImGui::IsMouseHoveringRect(p0, p2) && ImGui::GetMouseCursor() == ImGuiMouseCursor_Arrow) {
+				new_hover_row_index = i;
+				const int track_index = i-1;
+				if (ImGui::IsMouseClicked(0)) {
+					track_toggle(track_index);
+				}
+				if (ImGui::IsMouseClicked(1) && ImGui::IsMouseHoveringRect(p0, p1)) {
+					printf("TODO popup for track %d\n", track_index);
+				}
+				break;
+			}
+		}
+
+		ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+		{
+			ImGui::PushFont(g.fonts[1]);
+			struct trk* timetrk = &mid->trk_arr[0];
+			const int n_timetrack_events = arrlen(timetrk->mev_arr);
+			const ImVec2 reserve = ImGui::CalcTextSize("0000.0");
+			int numerator = 4;
+			int denominator_log2 = 2;
+			float beats_per_minute = 120.0;
+			int ttpos = 0;
+			float bx = state.beat0_x;
+			int bar = 0;
+			int tick = 0;
+			int tickpos = 0;
+			int pos = 0;
+			int last_spanpos = 0;
+			float last_spanbx = bx;
+
+			if (st0 == TIMESPAN_DRAG && state.timespan_select_mode == SELECT_FINE) {
+				if (reset_selected_timespan) {
+					state.selected_timespan.start = mu;
+					state.selected_timespan.end = mu;
+				} else {
+					if (mu < state.selected_timespan.start) {
+						state.selected_timespan.start = mu;
+						if (state.selected_timespan.start < 0) {
+							state.selected_timespan.start = 0;
+						}
+					}
+					if (mu > state.selected_timespan.end) {
+						state.selected_timespan.end = mu;
+						if (state.selected_timespan.end > mid->end_of_song_pos) {
+							state.selected_timespan.start = mid->end_of_song_pos;
+						}
+					}
+				}
+			}
+
+			const ImVec2 clip0(layout_x1, table_p0.y);
+			const ImVec2 clip1(table_p0.x + table_width, layout_y0s[n_rows]);
+			draw_list->PushClipRect(clip0, clip1);
+
+			{
+				const float t0 = (float)state.selected_timespan.s[0];
+				const float t1 = (float)state.selected_timespan.s[1];
+				if (t0 != t1) {
+					const float off = layout_x1 + state.beat0_x;
+					const float s = state.beat_dx / (float)mid->division;
+					const float x0 = off + t0 * s;
+					const float x1 = off + t1 * s;
+					draw_list->AddRectFilled(
+						ImVec2(x0, layout_y0s[0]),
+						ImVec2(x1, layout_y0s[1]),
+						ImGui::GetColorU32(C_TIMESPAN_TOP_COLOR));
+					if (n_rows > 1) {
+						draw_list->AddRectFilled(
+							ImVec2(x0, layout_y0s[1]),
+							ImVec2(x1, layout_y0s[n_rows]),
+							ImGui::GetColorU32(C_TIMESPAN_DIM_COLOR));
+					}
+				}
+			}
+
+			while (pos <= mid->end_of_song_pos) {
+				const bool is_spanpos =
+					(st0 == TIMESPAN_DRAG) &&
+					(
+					((state.timespan_select_mode == SELECT_BAR) && tickpos == 0) ||
+					(state.timespan_select_mode == SELECT_TICK)
+					);
+				if (is_spanpos && last_spanbx <= mx && mx < bx) {
+					if (reset_selected_timespan) {
+						state.selected_timespan.start = last_spanpos;
+						state.selected_timespan.end = pos;
+					} else if (st0 == TIMESPAN_DRAG) {
+						if (last_spanpos < state.selected_timespan.start) {
+							state.selected_timespan.start = last_spanpos;
+						}
+						if (pos > state.selected_timespan.end) {
+							state.selected_timespan.end = pos;
+						}
+					}
+				}
+
+				bool has_signature_change = false;
+				bool has_tempo_change = false;
+				for (;;) {
+					if (ttpos >= n_timetrack_events) break;
+					struct mev* mev = &timetrk->mev_arr[ttpos];
+					if (mev->pos > pos) break;
+					const uint8_t b0 = mev->b[0];
+					if (b0 == TIME_SIGNATURE) {
+						has_signature_change = true;
+						numerator = mev->b[1];
+						denominator_log2 = mev->b[2];
+						if (tickpos != 0) {
+							bar++;
+							tickpos = 0;
+						}
+					} else if (b0 == SET_TEMPO) {
+						has_tempo_change = true;
+						const int microseconds_per_quarter_note =
+							((int)(mev->b[1]) << 16) +
+							((int)(mev->b[2]) << 8)  +
+							((int)(mev->b[3]))       ;
+						beats_per_minute = 60e6/microseconds_per_quarter_note;
+					} else {
+						assert(!"unhandled time track event");
+					}
+					ttpos++;
+				}
+
+				const bool bz = tickpos == 0;
+
+				const float tw = bz ? C_TICK0_WIDTH : C_TICKN_WIDTH;
+				const float x0 = layout_x1 + bx - tw*0.5f;
+				const float y0 = layout_y0s[0];
+				const float x1 = x0+tw;
+				const float y1 = layout_y0s[n_rows];
+
+				if (x1 > clip0.x && x0 < clip1.x) {
+					draw_list->AddQuadFilled(
+						ImVec2(x0,y0),
+						ImVec2(x1,y0),
+						ImVec2(x1,y1),
+						ImVec2(x0,y1),
+						ImGui::GetColorU32(bz ? C_TICK0_COLOR : C_TICKN_COLOR));
+				}
+
+				const int flog2 = -(denominator_log2-2);
+				const float tick_dx = state.beat_dx * powf(2.0, flog2);
+				const bool print_per_beat = tick_dx > reserve.x;
+
+				const bool print = bz || print_per_beat;
+				char buf[1<<10];
+
+				if (print) {
+					if (print_per_beat) {
+						if (bz) {
+							snprintf(buf, sizeof buf, "%d.%d", bar+1, tickpos+1);
+						} else {
+							snprintf(buf, sizeof buf, ".%d", tickpos+1);
+						}
+					} else {
+						snprintf(buf, sizeof buf, "%d", bar+1);
+					}
+					draw_list->AddText(
+						ImVec2(x0 + getsz(0.3), layout_y0s[1] - reserve.y),
+						ImGui::GetColorU32(bz ? C_BAR_LABEL_COLOR : C_TICK_LABEL_COLOR),
+						buf);
+				}
+
+				if (has_signature_change || has_tempo_change) {
+					const int denominator = 1<<denominator_log2;
+					if (has_signature_change && has_tempo_change) {
+						snprintf(buf, sizeof buf, "%.1fBPM %d/%d", beats_per_minute, numerator, denominator);
+					} else if (has_signature_change) {
+						snprintf(buf, sizeof buf, "%d/%d", numerator, denominator);
+					} else if (has_tempo_change) {
+						snprintf(buf, sizeof buf, "%.1fBPM", beats_per_minute);
+					} else {
+						assert(!"UNREACHABLE");
+					}
+					draw_list->AddText(
+						ImVec2(x0 + getsz(0.3), y0),
+						ImGui::GetColorU32(C_TEMPO_LABEL_COLOR),
+						buf);
+				}
+
+
+				if (is_spanpos) {
+					last_spanpos = pos;
+					last_spanbx = bx;
+				}
+				pos += dshift(mid->division, flog2);
+				tickpos = (tickpos+1) % numerator;
+				if (tickpos == 0) bar++;
+				bx += tick_dx;
+			}
+
+			draw_list->PopClipRect();
+			ImGui::PopFont();
 		}
 	}
 
-	while (pos <= myd->end_of_song_pos) {
-		const bool is_spanpos =
-			(st0 == LEFT_DRAG) &&
-			(
-			((state.timespan_select_mode == SELECT_BAR) && tickpos == 0) ||
-			(state.timespan_select_mode == SELECT_TICK)
-			);
-		if (is_spanpos && last_spanbx <= mpos.x && mpos.x < bx) {
-			if (reset_selected_timespan) {
-				state.selected_timespan.start = last_spanpos;
-				state.selected_timespan.end = pos;
-			} else if (st0 == LEFT_DRAG) {
-				if (last_spanpos < state.selected_timespan.start) {
-					state.selected_timespan.start = last_spanpos;
-				}
-				if (pos > state.selected_timespan.end) {
-					state.selected_timespan.end = pos;
-				}
-			}
-		}
-
-		bool has_signature_change = false;
-		bool has_tempo_change = false;
-		for (;;) {
-			if (ttpos >= n_timetrack_events) break;
-			struct mev* mev = &timetrk->mev_arr[ttpos];
-			if (mev->pos > pos) break;
-			const uint8_t b0 = mev->b[0];
-			if (b0 == TIME_SIGNATURE) {
-				has_signature_change = true;
-				numerator = mev->b[1];
-				denominator_log2 = mev->b[2];
-				if (tickpos != 0) {
-					bar++;
-					tickpos = 0;
-				}
-			} else if (b0 == SET_TEMPO) {
-				has_tempo_change = true;
-				const int microseconds_per_quarter_note =
-					((int)(mev->b[1]) << 16) +
-					((int)(mev->b[2]) << 8)  +
-					((int)(mev->b[3]))       ;
-				beats_per_minute = 60e6/microseconds_per_quarter_note;
-			} else {
-				assert(!"unhandled time track event");
-			}
-			ttpos++;
-		}
-
-		const bool bz = tickpos == 0;
-
-		const float m = bz ? 2.0f : 1.0;
-		const float x0 = p0.x + bx - m/2;
-		const float y0 = p0.y;
-		const float x1 = x0+m;
-		const float y1 = y0+h;
-		draw_list->AddQuadFilled(
-			ImVec2(x0,y0),
-			ImVec2(x1,y0),
-			ImVec2(x1,y1),
-			ImVec2(x0,y1),
-			bz ? tick0_color : tick1_color);
-
-		const int flog2 = -(denominator_log2-2);
-		const float tick_dx = state.beat_dx * powf(2.0, flog2);
-		const bool print_per_beat = tick_dx > reserve.x;
-
-		const bool print = bz || print_per_beat;
-		char buf[1<<10];
-
-		if (print) {
-			if (print_per_beat) {
-				snprintf(buf, sizeof buf, "%d.%d", bar+1, tickpos+1);
-			} else {
-				snprintf(buf, sizeof buf, "%d", bar+1);
-			}
-			draw_list->AddText(
-				ImVec2(x0 + 5, p1.y - reserve.y),
-				bz ? bar_label_color : beat_label_color,
-				buf);
-		}
-
-		if (has_signature_change || has_tempo_change) {
-			const int denominator = 1<<denominator_log2;
-			if (has_signature_change && has_tempo_change) {
-				snprintf(buf, sizeof buf, "%.1fBPM %d/%d", beats_per_minute, numerator, denominator);
-			} else if (has_signature_change) {
-				snprintf(buf, sizeof buf, "%d/%d", numerator, denominator);
-			} else if (has_tempo_change) {
-				snprintf(buf, sizeof buf, "%.1fBPM", beats_per_minute);
-			} else {
-				assert(!"UNREACHABLE");
-			}
-			draw_list->AddText(
-				ImVec2(x0 + 5, p0.y),
-				signature_color,
-				buf);
-		}
-
-
-		if (is_spanpos) {
-			last_spanpos = pos;
-			last_spanbx = bx;
-		}
-		pos += dshift(myd->division, flog2);
-		tickpos = (tickpos+1) % numerator;
-		if (tickpos == 0) bar++;
-		bx += tick_dx;
-	}
-
-	ImGui::PopFont();
+	hover_row_index = new_hover_row_index;
 }
 
 static void g_root(void)
 {
-	#if 0
-	for (int i = 0; i < 10; i++) {
-		ImGui::Text("PAD %d", i);
-	}
-	#endif
-	g_timeline();
-
-	const ImVec2 bsz = ImVec2(getsz(3),0);
-	switch (state.timespan_select_mode) {
-	case SELECT_BAR:
-		if (ImGui::Button("Bar", bsz)) {
-			state.timespan_select_mode = SELECT_TICK;
-		}
-		break;
-	case SELECT_TICK:
-		if (ImGui::Button("Tick", bsz)) {
-			state.timespan_select_mode = SELECT_FINE;
-		}
-		break;
-	case SELECT_FINE:
-		if (ImGui::Button("Fine", bsz)) {
-			state.timespan_select_mode = SELECT_BAR;
-		}
-		break;
-	}
-
-	for (int i = 0; i < 100; i++) {
-		ImGui::Text("SCROLL %d", i);
-	}
-	#if 0
-	ImGui::Dummy(ImVec2(200, 200));
-	ImGui::SameLine();
-	ImGui::Button("b0");
-	ImGui::Button("b1");
-	#endif
+	g_header();
 }
 
 int main(int argc, char** argv)
