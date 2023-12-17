@@ -1487,7 +1487,7 @@ static void g_pianoroll(void)
 		ImGui::TableSetupColumn("notes", ImGuiTableColumnFlags_WidthStretch);
 		ImGui::TableNextRow();
 
-		const char* KEYS = "_#_#__#_#_#_";
+		const char* KEYS = "C#D#EF#G#A#B";
 		assert(strlen(KEYS) == 12);
 		//const int C4 = 60;
 
@@ -1540,10 +1540,17 @@ static void g_pianoroll(void)
 
 		ImDrawList* draw_list = ImGui::GetWindowDrawList();
 
+		ImGui::PushFont(g.fonts[1]);
+
+		const float line_height = ImGui::GetTextLineHeight();
+		const bool print_key_labels = st->key_dy > line_height;
+
 		{
 			draw_list->PushClipRect(table_p0, table_p1);
 
 			const float key_size = st->key_dy;
+
+			const ImU32 key_label_color = ImGui::GetColorU32(C_KEY_LABEL_COLOR);
 
 			for (int col = 0; col < 2; col++) {
 				float x0=0,x1=0;
@@ -1580,12 +1587,27 @@ static void g_pianoroll(void)
 						const float y1 = y + 0.5;
 						draw_list->AddRectFilled( ImVec2(x0, y0), ImVec2(x1, y1), black);
 					}
+					if (col == 0 && print_key_labels) {
+						char buf[1<<10];
+						const char* sep = "";
+						char k = key;
+						if (k == '#') {
+							sep = "#";
+							assert(note > 0);
+							k = KEYS[(note-1) % 12];
+						}
+						const int octave = (note/12)-1;
+						snprintf(buf, sizeof buf, "%c%s%d", k, sep, octave);
+						draw_list->AddText(ImVec2(x0 + getsz(0.3), y + key_size/2 - line_height/2), key_label_color, buf);
+					}
 					prev_key = key;
 				}
 			}
 
 			draw_list->PopClipRect();
 		}
+
+		ImGui::PopFont();
 	}
 
 	// toolbar
