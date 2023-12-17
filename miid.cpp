@@ -93,10 +93,10 @@ struct mev {
 	uint8_t b[4];
 };
 
-#define TRK_NAME_SIZE (1<<8)
+#define TEXT_FIELD_SIZE (1<<8)
 struct trk {
 	int midi_channel;
-	char name[TRK_NAME_SIZE];
+	char name[TEXT_FIELD_SIZE];
 	struct mev* mev_arr;
 	int has_meta;
 	int has_midi;
@@ -104,7 +104,7 @@ struct trk {
 
 
 struct mid {
-	char* text;
+	char text[TEXT_FIELD_SIZE];
 	int division;
 	int end_of_song_pos;
 	struct trk* trk_arr;
@@ -355,6 +355,20 @@ static int read_midi_varuint(struct blob* p)
 #define MThd "MThd"
 #define MTrk "MTrk"
 
+static void handle_text(const char* what, char* text, uint8_t* data, int len)
+{
+	if (strlen(text) == 0) {
+		if (len < (TEXT_FIELD_SIZE-1)) {
+			memcpy(text, data, len);
+			text[len] = 0;
+		} else {
+			fprintf(stderr, "WARNING: trashing very long %s\n", what);
+		}
+	} else {
+		fprintf(stderr, "WARNING: trashing %s; already got one\n", what);
+	}
+}
+
 static struct mid* mid_unmarshal_blob(struct blob blob)
 {
 	struct blob p = blob;
@@ -472,22 +486,9 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 					return NULL;
 				}
 				if (type == TEXT) {
-					if (mid->text == NULL) {
-						mid->text = dup2str(data, len);
-					} else {
-						fprintf(stderr, "WARNING: trashing TEXT; already got one\n");
-					}
+					handle_text("TEXT", mid->text, data, len);
 				} else if (type == TRACK_NAME) {
-					if (strlen(trk->name) == 0) {
-						if (len < 254) {
-							memcpy(trk->name, data, len);
-							trk->name[len] = 0;
-						} else {
-							fprintf(stderr, "WARNING: trashing very long TRACK TITLE\n");
-						}
-					} else {
-						fprintf(stderr, "WARNING: trashing TRACK TITLE; already got one\n");
-					}
+					handle_text("TRACK TITLE", trk->name, data, len);
 				} else if (type == INSTRUMENT_NAME) {
 					fprintf(stderr, "WARNING: trashing INSTRUMENT NAME\n");
 				} else if (type == MARKER) {
@@ -974,6 +975,7 @@ static void g_header(void)
 	int new_hover_row_index = -1;
 	bool reset_selected_timespan = false;
 	int do_popup_editing_track_index = -1;
+	bool do_open_menu = false;
 	if (ImGui::BeginTable("top", n_columns, table_flags)) {
 		ImGui::TableSetupColumn("ctrl",     ImGuiTableColumnFlags_WidthFixed);
 		ImGui::TableSetupColumn("timeline", ImGuiTableColumnFlags_WidthStretch);
@@ -1039,7 +1041,7 @@ static void g_header(void)
 
 					ImGui::SameLine();
 					if (ImGui::Button("M")) {
-						printf("TODO M\n");
+						do_open_menu = true;
 					}
 				} else {
 					const int track_index = row_index - 1;
@@ -1084,6 +1086,15 @@ static void g_header(void)
 
 		ImGui::EndTable();
 
+		if (do_open_menu) {
+			ImGui::OpenPopup("menu");
+		}
+		if (ImGui::BeginPopup("menu")) {
+			ImGui::SeparatorText("Menu");
+			ImGui::InputText("Title", mid->text, TEXT_FIELD_SIZE);
+			ImGui::EndPopup();
+		}
+
 		if (do_popup_editing_track_index >= 0) {
 			popup_editing_track_index = do_popup_editing_track_index;
 			ImGui::OpenPopup("track_edit_popup");
@@ -1092,13 +1103,13 @@ static void g_header(void)
 			struct trk* trk = &tracks[popup_editing_track_index];
 			ImGui::SeparatorText("Track Edit");
 
-			ImGui::InputText("Name", trk->name, TRK_NAME_SIZE);
+			ImGui::InputText("Name", trk->name, TEXT_FIELD_SIZE);
 
 			if (ImGui::InputInt("MIDI Channel", &trk->midi_channel)) {
 				if (trk->midi_channel < 0) trk->midi_channel = 0;
 				if (trk->midi_channel > 15) trk->midi_channel = 15;
 			}
-			//ImGui::Text("track \"%s\" ch%d", trk->name != NULL ? trk->name : "n/a", trk->midi_channel);
+
 			const bool can_move_up = popup_editing_track_index > 0;
 			const bool can_move_down = popup_editing_track_index < n_tracks-1;
 			ImGui::BeginDisabled(!can_move_up);
@@ -1118,6 +1129,10 @@ static void g_header(void)
 				popup_editing_track_index++;
 			}
 			ImGui::EndDisabled();
+
+			if (popup_editing_track_index < 10) {
+				ImGui::Text("Select with [%c]", "1234567890"[popup_editing_track_index]);
+			}
 			ImGui::EndPopup();
 		}
 
