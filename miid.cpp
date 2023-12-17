@@ -202,11 +202,12 @@ enum {
 };
 
 enum {
-	MODE0_EDIT, // normal edit mode
-	MODE0_ASK,  // no argv; [New Song] [Load Song] [Exit]?
-	MODE0_NEW,  // song foo.mid does not exist; [Create It] [Exit]?
-	MODE0_LOAD, // "load song" dialog
-	MODE0_SAVE, // "save song as" dialog
+	MODE0_EDIT,      // normal edit mode
+	MODE0_ASK,       // no argv; [New Song] [Load Song] [Exit]?
+	MODE0_NEW,       // song foo.mid does not exist; [Create It] [Exit]?
+	MODE0_LOAD,      // "load song" dialog
+	MODE0_SAVE,      // "save song as" dialog
+	MODE0_DO_CLOSE,  // window is closing
 };
 
 struct state {
@@ -1509,11 +1510,14 @@ static void state_common_init(struct state* st, int mode0)
 				#ifdef C_TTF
 				g.fonts[i] = shared_font_atlas->AddFontFromFileTTF(C_TTF, sz);
 				#else
-				g.fonts[i] = shared_font_atlas->AddFontFromMemoryTTF(font_ttf, font_ttf_len, sz);
+				ImFontConfig cfg;
+				cfg.FontDataOwnedByAtlas = false; // memory is static
+				g.fonts[i] = shared_font_atlas->AddFontFromMemoryTTF(font_ttf, font_ttf_len, sz, &cfg);
 				#endif
 			}
 		}
 		shared_font_atlas->Build();
+		assert(io.Fonts == shared_font_atlas);
 	}
 
 	st->mode0 = mode0;
@@ -1665,23 +1669,36 @@ int main(int argc, char** argv)
 	int exiting = 0;
 	while (!exiting) {
 		const int n_states = arrlen(g.state_arr);
+		if (n_states == 0) break;
 		SDL_Event e;
 		while (SDL_PollEvent(&e)) {
-			if ((e.type == SDL_QUIT) || (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_CLOSE)) {
+			if (e.type == SDL_QUIT) {
 				exiting = 1;
 			}
 			Uint32 window_id = get_event_window_id(&e);
 			for (int i = 0; i < n_states; i++) {
 				struct state* st = &g.state_arr[i];
 				if (SDL_GetWindowID(st->window) != window_id) continue;
-				ImGui::SetCurrentContext(st->imctx);
-				ImGui_ImplSDL2_ProcessEvent(&e);
+				if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_CLOSE) {
+					st->mode0 = MODE0_DO_CLOSE;
+				} else {
+					ImGui::SetCurrentContext(st->imctx);
+					ImGui_ImplSDL2_ProcessEvent(&e);
+				}
 				break;
 			}
 		}
 
 		for (int i = 0; i < n_states; i++) {
 			struct state* st = g.curstate = &g.state_arr[i];
+			if (st->mode0 == MODE0_DO_CLOSE) {
+				ImGui::DestroyContext(st->imctx);
+				SDL_GL_DeleteContext(st->glctx);
+				SDL_DestroyWindow(st->window);
+				// FIXME leaking st->myd, and more?
+				arrdel(g.state_arr, i);
+				break; // restart main loop
+			}
 
 			SDL_GL_MakeCurrent(st->window, st->glctx);
 			ImGui::SetCurrentContext(st->imctx);
