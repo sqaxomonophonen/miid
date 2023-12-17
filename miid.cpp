@@ -93,9 +93,10 @@ struct mev {
 	uint8_t b[4];
 };
 
+#define TRK_NAME_SIZE (1<<8)
 struct trk {
 	int midi_channel;
-	char* name;
+	char name[TRK_NAME_SIZE];
 	struct mev* mev_arr;
 	int has_meta;
 	int has_midi;
@@ -477,8 +478,13 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 						fprintf(stderr, "WARNING: trashing TEXT; already got one\n");
 					}
 				} else if (type == TRACK_NAME) {
-					if (trk->name == NULL) {
-						trk->name = dup2str(data, len);
+					if (strlen(trk->name) == 0) {
+						if (len < 254) {
+							memcpy(trk->name, data, len);
+							trk->name[len] = 0;
+						} else {
+							fprintf(stderr, "WARNING: trashing very long TRACK TITLE\n");
+						}
 					} else {
 						fprintf(stderr, "WARNING: trashing TRACK TITLE; already got one\n");
 					}
@@ -1038,9 +1044,9 @@ static void g_header(void)
 				} else {
 					const int track_index = row_index - 1;
 					struct trk* trk = &tracks[track_index];
-					char label[1<<8];
+					char label[1<<9];
 					snprintf(label, sizeof label, "%s (ch%d)",
-						trk->name != NULL ? trk->name : "n/a",
+						trk->name,
 						trk->midi_channel+1);
 
 					const ImVec2 save = ImGui::GetCursorPos();
@@ -1084,9 +1090,34 @@ static void g_header(void)
 		}
 		if (ImGui::BeginPopup("track_edit_popup")) {
 			struct trk* trk = &tracks[popup_editing_track_index];
-			ImGui::SeparatorText("Hello Track Edit");
-			ImGui::Button("ding");
-			ImGui::Text("track \"%s\" ch%d", trk->name != NULL ? trk->name : "n/a", trk->midi_channel);
+			ImGui::SeparatorText("Track Edit");
+
+			ImGui::InputText("Name", trk->name, TRK_NAME_SIZE);
+
+			if (ImGui::InputInt("MIDI Channel", &trk->midi_channel)) {
+				if (trk->midi_channel < 0) trk->midi_channel = 0;
+				if (trk->midi_channel > 15) trk->midi_channel = 15;
+			}
+			//ImGui::Text("track \"%s\" ch%d", trk->name != NULL ? trk->name : "n/a", trk->midi_channel);
+			const bool can_move_up = popup_editing_track_index > 0;
+			const bool can_move_down = popup_editing_track_index < n_tracks-1;
+			ImGui::BeginDisabled(!can_move_up);
+			if (ImGui::Button("Move Up")) {
+				struct trk tmp = tracks[popup_editing_track_index-1];
+				tracks[popup_editing_track_index-1] = tracks[popup_editing_track_index];
+				tracks[popup_editing_track_index] = tmp;
+				popup_editing_track_index--;
+			}
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+			ImGui::BeginDisabled(!can_move_down);
+			if (ImGui::Button("Down")) {
+				struct trk tmp = tracks[popup_editing_track_index+1];
+				tracks[popup_editing_track_index+1] = tracks[popup_editing_track_index];
+				tracks[popup_editing_track_index] = tmp;
+				popup_editing_track_index++;
+			}
+			ImGui::EndDisabled();
 			ImGui::EndPopup();
 		}
 
