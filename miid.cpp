@@ -196,6 +196,8 @@ struct state {
 
 	float key127_y;
 	float key_dy = C_DEFAULT_KEY_HEIGHT_PX;
+
+	bool keyjazz_tester_enabled;
 };
 
 
@@ -1651,6 +1653,33 @@ static void state_new_song(struct state* st)
 static void g_root(void)
 {
 	struct state* st = curstate();
+
+	if (ImGui::IsWindowFocused()) {
+		if (ImGui::IsKeyPressed(CKEY(toggle_keyjazz_tester_key))) {
+			st->keyjazz_tester_enabled = !st->keyjazz_tester_enabled;
+			if (!st->keyjazz_tester_enabled) {
+				printf("TODO kill notes\n"); // TODO
+			}
+		}
+		if (st->keyjazz_tester_enabled) {
+			int i = 0;
+			for (;;) {
+				struct keyjazz_keymap* m = get_keyjazz_keymap(i++);
+				if (m == NULL) break;
+				const int ch = 0; // XXX
+				const int key = 48 + m->note; // XXX
+				const int vel = 100; // XXX
+				if (ImGui::IsKeyPressed(m->keycode, false)) {
+					fluid_synth_noteon(g.fluid_synth, ch,  key, vel);
+				}
+				if (ImGui::IsKeyReleased(m->keycode)) {
+					fluid_synth_noteoff(g.fluid_synth, ch,  key);
+				}
+			}
+		}
+	} else {
+	}
+
 	switch (st->mode0) {
 	case MODE0_EDIT:
 		g_edit();
@@ -1801,6 +1830,8 @@ static Uint32 get_event_window_id(SDL_Event* e)
 
 int main(int argc, char** argv)
 {
+	config_init();
+
 	char* MIID_SF2 = getenv("MIID_SF2");
 	if (MIID_SF2 == NULL || strlen(MIID_SF2) == 0) {
 		fprintf(stderr, "WARNING: disabling audio because MIID_SF2 is not set (should contain colon-separated list of paths to SoundFonts)\n");
@@ -1900,21 +1931,7 @@ int main(int argc, char** argv)
 
 		for (int i = 0; i < n_states; i++) {
 			struct state* st = g.curstate = &g.state_arr[i];
-			#if 1
-			if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-				// XXX remove this eventually?
-				st->mode0 = MODE0_DO_CLOSE;
-			}
-			const int ch = 9;
-			const int key = 49;
-			const int vel = 127;
-			if (ImGui::IsKeyPressed(ImGuiKey_1)) {
-				fluid_synth_noteon(g.fluid_synth, ch,  key, vel);
-			}
-			if (ImGui::IsKeyPressed(ImGuiKey_2)) {
-				fluid_synth_noteoff(g.fluid_synth, ch, key);
-			}
-			#endif
+
 			if (st->mode0 == MODE0_DO_CLOSE) {
 				ImGui::DestroyContext(st->imctx);
 				SDL_GL_DeleteContext(st->glctx);
