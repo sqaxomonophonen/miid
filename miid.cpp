@@ -57,6 +57,7 @@ struct trk {
 	int midi_channel;
 	char* name;
 	struct mev* mev_arr;
+	bool percussive; // true if mev_arr has NOTE ONs, but no NOTE OFFs
 };
 
 struct mid {
@@ -201,7 +202,7 @@ struct state {
 
 struct g {
 	float config_size1;
-	int using_audio;
+	bool using_audio;
 	ImFont* fonts[ARRAY_LENGTH(font_sizes)];
 	SDL_AudioDeviceID audio_device;
 	fluid_synth_t* fluid_synth;
@@ -438,6 +439,8 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 		int end_of_track = 0;
 		int last_b0 = -1;
 		int current_midi_channel = -1;
+		int n_note_on = 0;
+		int n_note_off = 0;
 		while (remaining > 0) {
 			if (end_of_track) {
 				fprintf(stderr, "ERROR: premature end of track marker\n");
@@ -564,8 +567,10 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 					emit_mev = 1;
 				}
 			} else if (h0 == NOTE_OFF) {
+				n_note_off++;
 				nstd = 2;
 			} else if (h0 == NOTE_ON) {
+				n_note_on++;
 				nstd = 2;
 			} else if (h0 == POLY_AFTERTOUCH) {
 				nstd = 2;
@@ -657,6 +662,10 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 			assert(trk->midi_channel >= 0);
 		}
 
+		if (n_note_on > 0 && n_note_off == 0) {
+			trk->percussive = true;
+		}
+
 		track_index++;
 	}
 
@@ -689,6 +698,10 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 				return NULL;
 			}
 		}
+	}
+
+	for (int i = 1; i < n_tracks; i++) {
+		struct trk* trk = &mid->trk_arr[track_index];
 	}
 
 	#if 0
@@ -1136,9 +1149,21 @@ static void g_header(void)
 
 			ImGui::InputText("Name", trk->name, TEXT_FIELD_SIZE);
 
-			if (ImGui::InputInt("MIDI Channel", &trk->midi_channel)) {
-				if (trk->midi_channel < 0) trk->midi_channel = 0;
-				if (trk->midi_channel > 15) trk->midi_channel = 15;
+			int human_midi_channel = trk->midi_channel + 1;
+			if (ImGui::InputInt("MIDI Channel", &human_midi_channel)) {
+				if (human_midi_channel < 1)  human_midi_channel = 1;
+				if (human_midi_channel > 16) human_midi_channel = 16;
+				trk->midi_channel = human_midi_channel - 1;
+			}
+
+			if (ImGui::Checkbox("Percussive (NOTE ON only)", &trk->percussive)) {
+				if (trk->percussive) {
+					printf("TODO remove NOTE OFF events\n"); // TODO
+				} else {
+					// TODO maybe insert NOTE OFFs at end
+					// of song? or maybe have notes time
+					// out after 1 beat or something?
+				}
 			}
 
 			const bool can_move_up = state->header.popup_editing_track_index > 0;
@@ -1767,6 +1792,13 @@ static Uint32 get_event_window_id(SDL_Event* e)
 
 int main(int argc, char** argv)
 {
+	char* MIID_SF2 = getenv("MIID_SF2");
+	if (MIID_SF2 == NULL || strlen(MIID_SF2) == 0) {
+		fprintf(stderr, "WARNING: disabling audio because MIID_SF2 is not set (should contain colon-separated list of paths to SoundFonts)\n");
+	} else {
+		g.using_audio = true;
+	}
+
 	assert(SDL_Init(SDL_INIT_TIMER | (g.using_audio?SDL_INIT_AUDIO:0) | SDL_INIT_VIDEO) == 0);
 	atexit(SDL_Quit);
 
@@ -1807,13 +1839,6 @@ int main(int argc, char** argv)
 				}
 			}
 		}
-	}
-
-	char* MIID_SF2 = getenv("MIID_SF2");
-	if (MIID_SF2 == NULL || strlen(MIID_SF2) == 0) {
-		fprintf(stderr, "WARNING: disabling audio because MIID_SF2 is not set (should contain colon-separated list of paths to SoundFonts)\n");
-	} else {
-		g.using_audio = 1;
 	}
 
 	if (g.using_audio) {
@@ -1885,6 +1910,15 @@ int main(int argc, char** argv)
 			if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
 				// XXX remove this eventually?
 				st->mode0 = MODE0_DO_CLOSE;
+			}
+			const int ch = 9;
+			const int key = 49;
+			const int vel = 127;
+			if (ImGui::IsKeyPressed(ImGuiKey_1)) {
+				fluid_synth_noteon(g.fluid_synth, ch,  key, vel);
+			}
+			if (ImGui::IsKeyPressed(ImGuiKey_2)) {
+				fluid_synth_noteoff(g.fluid_synth, ch, key);
 			}
 			#endif
 			if (st->mode0 == MODE0_DO_CLOSE) {
