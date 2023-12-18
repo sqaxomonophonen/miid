@@ -19,8 +19,7 @@
 
 #include "generalmidi.h"
 #include "config.h"
-
-#define ARRAY_LENGTH(xs) (sizeof(xs) / sizeof((xs)[0]))
+#include "util.h"
 
 static const char* get_drum_key(int note)
 {
@@ -201,7 +200,6 @@ struct state {
 
 
 struct g {
-	float config_size1;
 	bool using_audio;
 	ImFont* fonts[ARRAY_LENGTH(font_sizes)];
 	SDL_AudioDeviceID audio_device;
@@ -918,8 +916,7 @@ static uint8_t* mid_marshal_arr(struct mid* mid)
 
 static inline float getsz(float scalar)
 {
-	assert((g.config_size1 > 0) && "called before init?");
-	return g.config_size1 * scalar;
+	return CFLOAT(gui_size) * scalar;
 }
 
 static inline int dshift(int v, int shift)
@@ -966,14 +963,26 @@ static void track_toggle(int index)
 
 static void ToggleButton(const char* label, bool* p, ImVec4 color)
 {
-	ImVec4 base = *p ? color : color_scale(color, C_TOGGLE_BUTTON_OFF_SCALAR);
-	ImGui::PushStyleColor(ImGuiCol_Button, base);
-	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, color_brighten(base, C_TOGGLE_BUTTON_HOVER_BRIGHTEN));
-	ImGui::PushStyleColor(ImGuiCol_ButtonActive,  color_brighten(base, C_TOGGLE_BUTTON_ACTIVE_BRIGHTEN));
+	ImVec4 x = color;
+	if (!*p) x = CCOLTX(x, toggle_button_off_coltx);
+	ImGui::PushStyleColor(ImGuiCol_Button, x);
+	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, CCOLTX(x, toggle_button_hover_coltx));
+	ImGui::PushStyleColor(ImGuiCol_ButtonActive,  CCOLTX(x, toggle_button_active_coltx));
+
 	if (ImGui::Button(label)) {
 		*p = !*p;
 	}
 	ImGui::PopStyleColor(3);
+}
+
+static inline float lerp(float x0, float x1, float t)
+{
+	return x0 + t*(x1-x0);
+}
+
+static inline float mouse_wheel_scalar(float wheel)
+{
+	return powf(lerp(1.001f, 1.4f, CFLOAT(wheel_sensitivity)), wheel);
 }
 
 static void g_header(void)
@@ -1017,15 +1026,15 @@ static void g_header(void)
 			layout_y0s[row_index] = ImGui::GetCursorScreenPos().y;
 
 			if (row_index > 0) {
-				ImVec4 c = (row_index & 1) == 1 ? C_TRACK_ROW_EVEN_COLOR : C_TRACK_ROW_ODD_COLOR;
+				ImVec4 c = (row_index & 1) == 1 ? CCOL(track_row_even_color) : CCOL(track_row_odd_color);
 				if (row_index == state->header.hover_row_index) {
-					c = color_add(c, C_TRACK_ROW_HOVER_ADD_COLOR);
+					c = CCOLTX(c, track_row_hover_coltx);
 				}
 				const int track_index = row_index - 1;
 				if (track_index == state->primary_track_select) {
-					c = color_add(c, C_TRACK_ROW_PRIMARY_SELECTION_ADD_COLOR);
+					c = CCOLTX(c, primary_track_coltx);
 				} else if (state->track_select_set[track_index]) {
-					c = color_add(c, C_TRACK_ROW_SECONDARY_SELECTION_ADD_COLOR);
+					c = CCOLTX(c, other_track_coltx);
 				}
 				ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::GetColorU32(c));
 			}
@@ -1038,7 +1047,7 @@ static void g_header(void)
 					ImGui::SameLine();
 					if (ImGui::Button("Loop")) {
 					}
-					ToggleButton("T", &state->header.show_tracks, C_TRACKS_ROW_TOGGLE_COLOR);
+					ToggleButton("T", &state->header.show_tracks, CCOL(tracks_toggle_color));
 					ImGui::SetItemTooltip("Toggle track rows visibility");
 
 					ImGui::SameLine();
@@ -1236,7 +1245,7 @@ static void g_header(void)
 
 			const float mw = io.MouseWheel;
 			if (is_hover && !is_drag && mw != 0) {
-				const float zoom_scalar = powf(C_TIMELINE_ZOOM_SENSITIVITY, mw);
+				const float zoom_scalar = mouse_wheel_scalar(mw);
 				const float new_beat_dx = state->beat_dx * zoom_scalar;
 				state->beat0_x = -((mx - state->beat0_x) / state->beat_dx) * new_beat_dx + mx;
 				state->beat_dx = new_beat_dx;
@@ -1318,12 +1327,12 @@ static void g_header(void)
 					draw_list->AddRectFilled(
 						ImVec2(x0, layout_y0s[0]),
 						ImVec2(x1, layout_y0s[1]),
-						ImGui::GetColorU32(C_TIMESPAN_TOP_COLOR));
+						CCOL32(timespan_top_color));
 					if (n_rows > 1) {
 						draw_list->AddRectFilled(
 							ImVec2(x0, layout_y0s[1]),
 							ImVec2(x1, layout_y0s[n_rows]),
-							ImGui::GetColorU32(C_TIMESPAN_DIM_COLOR));
+							CCOL32(timespan_dim_color));
 					}
 				}
 			}
@@ -1379,7 +1388,7 @@ static void g_header(void)
 
 				const bool bz = tickpos == 0;
 
-				const float tw = bz ? C_TICK0_WIDTH : C_TICKN_WIDTH;
+				const float tw = bz ? CFLOAT(tick0_size) : CFLOAT(tickn_size);
 				const float x0 = layout_x1 + bx - tw*0.5f;
 				const float y0 = layout_y0s[0];
 				const float x1 = x0+tw;
@@ -1391,7 +1400,7 @@ static void g_header(void)
 						ImVec2(x1,y0),
 						ImVec2(x1,y1),
 						ImVec2(x0,y1),
-						ImGui::GetColorU32(bz ? C_TICK0_COLOR : C_TICKN_COLOR));
+						bz ? CCOL32(tick0_color) : CCOL32(tickn_color));
 				}
 
 				const int flog2 = -(denominator_log2-2);
@@ -1413,7 +1422,7 @@ static void g_header(void)
 					}
 					draw_list->AddText(
 						ImVec2(x0 + getsz(0.3), layout_y0s[1] - reserve.y),
-						ImGui::GetColorU32(bz ? C_BAR_LABEL_COLOR : C_TICK_LABEL_COLOR),
+						bz ? CCOL32(bar_label_color) : CCOL32(tick_label_color),
 						buf);
 				}
 
@@ -1430,7 +1439,7 @@ static void g_header(void)
 					}
 					draw_list->AddText(
 						ImVec2(x0 + getsz(0.3), y0),
-						ImGui::GetColorU32(C_TEMPO_LABEL_COLOR),
+						CCOL32(tempo_label_color),
 						buf);
 				}
 
@@ -1496,7 +1505,7 @@ static void g_pianoroll(void)
 				st->pianoroll.pan_last_y = 0;
 			}
 			if (is_hover && !is_drag && mw != 0) {
-				const float zoom_scalar = powf(C_KEY_ZOOM_SENSITIVITY, mw);
+				const float zoom_scalar = mouse_wheel_scalar(mw);
 				const float new_key_dy = st->key_dy * zoom_scalar;
 				st->key127_y = -((my - st->key127_y) / st->key_dy) * new_key_dy + my;
 				st->key_dy = new_key_dy;
@@ -1535,7 +1544,7 @@ static void g_pianoroll(void)
 
 			const float key_size = st->key_dy;
 
-			const ImU32 key_label_color = ImGui::GetColorU32(C_KEY_LABEL_COLOR);
+			const ImU32 key_label_color = CCOL32(key_label_color);
 
 			for (int col = 0; col < 2; col++) {
 				float x0=0,x1=0;
@@ -1543,14 +1552,14 @@ static void g_pianoroll(void)
 				if (col == 0) {
 					x0 = table_p0.x;
 					x1 = x0 + w0;
-					black = ImGui::GetColorU32(C_BLACK_KEYS_COLOR);
-					white = ImGui::GetColorU32(C_WHITE_KEYS_COLOR);
+					black = CCOL32(black_keys_color);
+					white = CCOL32(white_keys_color);
 				} else if (col == 1) {
 					const float m = 20;
 					x0 = table_p0.x + w0 + m;
 					x1 = x0 + w1 - m;
-					black = ImGui::GetColorU32(C_BLACK_PIANOROLL_COLOR);
-					white = ImGui::GetColorU32(C_WHITE_PIANOROLL_COLOR);
+					black = CCOL32(black_pianoroll_color);
+					white = CCOL32(white_pianoroll_color);
 				} else {
 					assert(!"UNREACHABLE");
 				}
@@ -1806,21 +1815,6 @@ int main(int argc, char** argv)
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 1);
-
-	char* MIID_SZ = getenv("MIID_SZ");
-	if (MIID_SZ != NULL && strlen(MIID_SZ) > 0) {
-		g.config_size1 = atoi(MIID_SZ);
-		if (g.config_size1 == 0) {
-			fprintf(stderr, "WARNING: invalid MIID_SZ value [%s]\n", MIID_SZ);
-		}
-	} else {
-		g.config_size1 = C_DEFAULT_SIZE;
-	}
-
-	{
-		const float MIN_CONFIG_SIZE1 = 8;
-		if (g.config_size1 < MIN_CONFIG_SIZE1) g.config_size1 = MIN_CONFIG_SIZE1;
-	}
 
 	IMGUI_CHECKVERSION();
 

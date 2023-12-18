@@ -15,8 +15,9 @@ binfont.c: font.ttf
 IMGUI_OBJS=imgui.o imgui_widgets.o imgui_tables.o imgui_draw.o imgui_impl_sdl2.o imgui_impl_opengl2.o
 
 miid.o: miid.cpp config.h
+config.o: config.cpp config.h
 
-miid: miid.o binfont.o $(IMGUI_OBJS)
+miid: miid.o config.o binfont.o $(IMGUI_OBJS)
 	$(CXX) $^ $(LDLIBS) -o $@
 
 clean:

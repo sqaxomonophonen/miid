@@ -1,56 +1,58 @@
 #ifndef CONFIG_H
 
-// TODO keybinding
-// TODO mouse wheel sensitivity?
+#include "imgui.h"
 
-// default GUI size; overridable with MIID_SZ environment variable
-#define C_DEFAULT_SIZE (20)
+//  key                                   type/default
+#define EMIT_CONFIGS                                             \
+C(  gui_size                            , PX(20)               ) \
+C(  wheel_sensitivity                   , SLIDE(0.2)           ) \
+C(  toggle_button_off_coltx             , MUL_RGB(0x444444)    ) \
+C(  toggle_button_hover_coltx           , ADD_RGB(0x303030)    ) \
+C(  toggle_button_active_coltx          , ADD_RGB(0x808080)    ) \
+C(  tracks_toggle_color                 , RGB(0x008020)        ) \
+C(  track_row_even_color                , RGB(0x111111)        ) \
+C(  track_row_odd_color                 , RGB(0x000011)        ) \
+C(  track_row_hover_coltx               , ADD_RGB(0x111111)    ) \
+C(  primary_track_coltx                 , ADD_RGB(0x443355)    ) \
+C(  other_track_coltx                   , ADD_RGB(0x001166)    ) \
+C(  tick0_size                          , PX(2.0)              ) \
+C(  tick0_color                         , RGBA(0xffffff80)     ) \
+C(  tickn_size                          , PX(1.0)              ) \
+C(  tickn_color                         , RGBA(0xffffff10)     ) \
+C(  bar_label_color                     , RGB(0xffff00)        ) \
+C(  tick_label_color                    , RGB(0x555500)        ) \
+C(  tempo_label_color                   , RGB(0xcc77cc)        ) \
+C(  key_label_color                     , RGB(0x000000)        ) \
+C(  timespan_top_color                  , RGB(0x554400)        ) \
+C(  timespan_dim_color                  , RGBA(0x55440040)     ) \
+C(  white_keys_color                    , RGB(0x444444)        ) \
+C(  black_keys_color                    , RGB(0x333333)        ) \
+C(  white_pianoroll_color               , RGB(0x161616)        ) \
+C(  black_pianoroll_color               , RGB(0x101010)        ) \
+C(  END                                 , NONE                 )
 
-// bake path to default font, instead of one built into binary. the MIID_TTF
-// environment variable still overrides both.
-//   #define C_TTF "/usr/share/fonts/truetype/..."
+#define CN(NAME) CONFIG_ ## NAME
 
+enum config_id {
+	#define C(NAME,DEFAULT) CN(NAME),
+	EMIT_CONFIGS
+	#undef C
+};
+
+float  config_get_float(enum config_id);
+ImVec4 config_get_color(enum config_id);
+ImVec4 config_color_transform(ImVec4 x, enum config_id);
+
+#define CFLOAT(NAME)          config_get_float(CN(NAME))
+#define CCOL(NAME)            config_get_color(CN(NAME))
+#define CCOLTX(VALUE,NAME)    config_color_transform(VALUE,CN(NAME))
+#define CCOL32(NAME)          ImGui::GetColorU32(CCOL(NAME))
+
+// TODO keybinding? keyjazz?
+
+// state defaults
 #define C_DEFAULT_BEAT_WIDTH_PX (24)
 #define C_DEFAULT_KEY_HEIGHT_PX (12)
-
-#define C_TIMELINE_ZOOM_SENSITIVITY (1.05)
-#define C_KEY_ZOOM_SENSITIVITY      (1.05)
-
-
-///////////////////////////////////////////////////////////////////////////////
-// colors
-#define RGB(v)  ImColor(                      ((v)>>16)&0xff, ((v)>>8)&0xff, (v)&0xff ).Value
-#define RGBA(v) ImColor( (((int)v)>>24)&0xff, ((v)>>16)&0xff, ((v)>>8)&0xff, (v)&0xff ).Value
-#define C_TOGGLE_BUTTON_OFF_SCALAR        (0.3)
-#define C_TOGGLE_BUTTON_HOVER_BRIGHTEN    (0.2)
-#define C_TOGGLE_BUTTON_ACTIVE_BRIGHTEN   (0.5)
-
-#define C_TRACKS_ROW_TOGGLE_COLOR     RGB(0x008020)
-
-#define C_TRACK_ROW_EVEN_COLOR                        RGB(0x111111)
-#define C_TRACK_ROW_ODD_COLOR                         RGB(0x000011)
-#define C_TRACK_ROW_HOVER_ADD_COLOR                   RGB(0x111111)
-#define C_TRACK_ROW_PRIMARY_SELECTION_ADD_COLOR       RGB(0x443355)
-#define C_TRACK_ROW_SECONDARY_SELECTION_ADD_COLOR     RGB(0x001166)
-
-#define C_TICK0_WIDTH (2.0)
-#define C_TICK0_COLOR RGBA(0xffffff80)
-
-#define C_TICKN_WIDTH (1.0)
-#define C_TICKN_COLOR RGBA(0xffffff10)
-
-#define C_BAR_LABEL_COLOR    RGB(0xffff00)
-#define C_TICK_LABEL_COLOR   RGB(0x555500)
-#define C_TEMPO_LABEL_COLOR  RGB(0xcc77cc)
-#define C_KEY_LABEL_COLOR    RGB(0x000000)
-
-#define C_TIMESPAN_TOP_COLOR  RGB(0x554400)
-#define C_TIMESPAN_DIM_COLOR  RGBA(0x55440040)
-
-#define C_WHITE_KEYS_COLOR         RGB(0x444444)
-#define C_BLACK_KEYS_COLOR         RGB(0x333333)
-#define C_WHITE_PIANOROLL_COLOR    RGB(0x161616)
-#define C_BLACK_PIANOROLL_COLOR    RGB(0x101010)
 
 #define CONFIG_H
 #endif
