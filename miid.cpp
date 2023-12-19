@@ -1532,6 +1532,8 @@ static void g_pianoroll(void)
 
 		ImGuiIO& io = ImGui::GetIO();
 
+		bool try_note_fit = false;
+
 		float w0 = 0, w1 = 0;
 		ImGui::TableSetColumnIndex(0);
 		{
@@ -1543,6 +1545,8 @@ static void g_pianoroll(void)
 			const bool is_hover = ImGui::IsItemHovered();
 			const bool click_lmb = is_hover && ImGui::IsMouseClicked(0);
 			const bool click_rmb = is_hover && ImGui::IsMouseClicked(1);
+			const bool doubleclick_rmb = is_hover && ImGui::IsMouseDoubleClicked(1);
+			if (doubleclick_rmb) try_note_fit = true;
 			const float mw = io.MouseWheel;
 			const float my = io.MousePos.y - table_p0.y;
 			if (click_rmb) {
@@ -1654,8 +1658,8 @@ static void g_pianoroll(void)
 		}
 
 		if (have_selected_timespan) {
-			ImVec2 clip0(table_p0.x + w0 + table_separator, table_p0.y);
-			ImVec2 clip1(clip0.x + w1 - table_separator, table_p1.y);
+			const ImVec2 clip0(table_p0.x + w0 + table_separator, table_p0.y);
+			const ImVec2 clip1(clip0.x + w1 - table_separator,    table_p1.y);
 
 			const int t0 = selected_timespan.start;
 			const int t1 = selected_timespan.end;
@@ -1666,6 +1670,8 @@ static void g_pianoroll(void)
 			const ImU32 border_color = CCOL32(pianoroll_note_border_color);
 			const float border_size = CFLOAT(pianoroll_note_border_size);
 
+			int note_min = -1;
+			int note_max = -1;
 			const int n_tracks = mid_get_track_count(mid);
 			for (int pass = 0; pass < 2; pass++) {
 				if (pass == 1 && st->primary_track_select < 0) break;
@@ -1698,6 +1704,8 @@ static void g_pianoroll(void)
 						if (is_other) cc = CCOLTX(cc, pianoroll_note_other_track_coltx);
 						const ImU32 color = ImGui::GetColorU32(cc);
 
+						bool is_visible = false;
+
 						if (!percussive) {
 							int p1 = mid->end_of_song_pos;
 							for (int i1 = i0+1; i1 < n; i1++) {
@@ -1714,16 +1722,39 @@ static void g_pianoroll(void)
 								draw_list->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), color);
 								if (border_size > 0 && border_color > 0) {
 									draw_list->AddRect(ImVec2(x0, y0), ImVec2(x1, y1), border_color, 0, 0, border_size);
+									is_visible = true;
 								}
 							}
 						} else {
-							const float kh = key_size * 0.5f;
-							draw_list->AddCircleFilled(ImVec2(x0, y0 + kh), kh, color);
+							if (x0 > (clip0.x - key_size) && x0 < clip1.x + key_size) {
+								const float kh = key_size * 0.5f;
+								draw_list->AddCircleFilled(ImVec2(x0, y0 + kh), kh, color);
+								is_visible = true;
+							}
+						}
+
+						if (is_visible) {
+							if (note_min == -1) {
+								note_min = note;
+								note_max = note;
+							}  else {
+								if (note < note_min) note_min = note;
+								if (note > note_max) note_max = note;
+							}
 						}
 					}
 
 					draw_list->PopClipRect();
 				}
+			}
+
+			if (try_note_fit && note_min != -1) {
+				const float s = lerp(0.0f, 0.4f, CFLOAT(note_fit_padding));
+				const float vy0 = lerp(clip0.y, clip1.y, s);
+				const float vy1 = lerp(clip0.y, clip1.y, 1-s);
+				assert(note_max >= note_min);
+				st->key_dy = (float)(vy1 - vy0) / (float)(note_max - note_min + 1);
+				st->key127_y = (float)(note_max - 127) * st->key_dy + (vy0 - clip0.y);
 			}
 		}
 

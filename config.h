@@ -6,6 +6,7 @@
 #define EMIT_CONFIGS                                                      \
 C(  gui_size                            , PX(20)                        ) \
 C(  wheel_sensitivity                   , SLIDE(0.2)                    ) \
+C(  note_fit_padding                    , SLIDE(0.3)                    ) \
 C(  toggle_button_off_coltx             , MUL_RGB(0x444444)             ) \
 C(  toggle_button_hover_coltx           , ADD_RGB(0x303030)             ) \
 C(  toggle_button_active_coltx          , ADD_RGB(0x808080)             ) \
