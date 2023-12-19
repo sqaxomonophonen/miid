@@ -148,21 +148,20 @@ void config_init(void)
 		fprintf(stderr, "NOTE: disabling audio because MIID_SF2 is not set (should contain colon-separated list of paths to SoundFonts)\n");
 	} else {
 		using_audio = true;
+		char* cp = copystring(MIID_SF2);
+		char* p = cp;
+		for (;;) {
+			char* p0 = p;
+			while (*p && *p != ':') p++;
+			const int is_last = (*p == 0);
+			*p = 0;
+			char* path = copystring(p0);
+			arrput(sf2_arr, path);
+			if (is_last) break;
+			p++;
+		}
+		free(cp);
 	}
-
-	char* cp = copystring(MIID_SF2);
-	char* p = cp;
-	for (;;) {
-		char* p0 = p;
-		while (*p && *p != ':') p++;
-		const int is_last = (*p == 0);
-		*p = 0;
-		char* path = copystring(p0);
-		arrput(sf2_arr, path);
-		if (is_last) break;
-		p++;
-	}
-	free(cp);
 }
 
 int config_get_soundfont_count(void)

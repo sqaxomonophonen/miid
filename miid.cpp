@@ -235,7 +235,7 @@ static void refresh_soundfont(void)
 		g.current_soundfont_index = n-1;
 	}
 	const int i = g.current_soundfont_index;
-	if (i < 0) {
+	if (i < 0 || i >= n) {
 		return;
 	}
 	if (i >= ARRAY_LENGTH(g.soundfont_error) || g.soundfont_error[i]) {
