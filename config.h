@@ -25,10 +25,16 @@ C(  tempo_label_color                   , RGB(0xcc77cc)                 ) \
 C(  key_label_color                     , RGB(0x000000)                 ) \
 C(  timespan_top_color                  , RGB(0x554400)                 ) \
 C(  timespan_dim_color                  , RGBA(0x55440040)              ) \
+C(  track_data_color                    , RGBA(0x80ff0030)              ) \
 C(  white_keys_color                    , RGB(0x444444)                 ) \
 C(  black_keys_color                    , RGB(0x333333)                 ) \
 C(  white_pianoroll_color               , RGB(0x161616)                 ) \
 C(  black_pianoroll_color               , RGB(0x101010)                 ) \
+C(  pianoroll_note_color0               , RGBA(0xff000030)              ) \
+C(  pianoroll_note_color1               , RGBA(0xff80ffff)              ) \
+C(  pianoroll_note_border_color         , RGBA(0x00000077)              ) \
+C(  pianoroll_note_border_size          , PX(1)                         ) \
+C(  pianoroll_note_other_track_coltx    , MUL_RGBA(0x4080ff80)          ) \
 C(  toggle_keyjazz_tester_key           , KEY(ImGuiKey_GraveAccent)     ) \
 C(  END                                 , NONE                          )
 

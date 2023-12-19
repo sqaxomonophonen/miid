@@ -79,7 +79,7 @@ static inline int mid_get_track_count(struct mid* mid)
 	return n;
 }
 
-static inline struct trk* mid_get_track(struct mid* mid, int index)
+static inline struct trk* mid_get_trk(struct mid* mid, int index)
 {
 	const int n = mid_get_track_count(mid);
 	assert(0 <= index && index < n);
@@ -993,11 +993,6 @@ static void ToggleButton(const char* label, bool* p, ImVec4 color)
 	ImGui::PopStyleColor(3);
 }
 
-static inline float lerp(float x0, float x1, float t)
-{
-	return x0 + t*(x1-x0);
-}
-
 static inline float mouse_wheel_scalar(float wheel)
 {
 	return powf(lerp(1.001f, 1.4f, CFLOAT(wheel_sensitivity)), wheel);
@@ -1095,7 +1090,7 @@ static void g_header(void)
 					if (ImGui::Button("Song")) do_open_song_popup = true;
 				} else {
 					const int track_index = row_index - 1;
-					struct trk* trk = mid_get_track(mid, track_index);
+					struct trk* trk = mid_get_trk(mid, track_index);
 					char label[1<<9];
 					snprintf(label, sizeof label, "%s (ch%d)",
 						trk->name,
@@ -1170,7 +1165,7 @@ static void g_header(void)
 			ImGui::OpenPopup("track_edit_popup");
 		}
 		if (ImGui::BeginPopup("track_edit_popup")) {
-			struct trk* trk = mid_get_track(mid, state->header.popup_editing_track_index);
+			struct trk* trk = mid_get_trk(mid, state->header.popup_editing_track_index);
 			ImGui::SeparatorText("Track Edit");
 
 			ImGui::InputText("Name", trk->name, TEXT_FIELD_SIZE);
@@ -1195,7 +1190,7 @@ static void g_header(void)
 			const bool can_move_up = state->header.popup_editing_track_index > 0;
 			const bool can_move_down = state->header.popup_editing_track_index < n_tracks-1;
 			ImGui::BeginDisabled(!can_move_up);
-			struct trk* _tracks = mid_get_track(mid, 0);
+			struct trk* _tracks = mid_get_trk(mid, 0);
 			if (ImGui::Button("Move Up")) {
 				struct trk tmp = _tracks[state->header.popup_editing_track_index-1];
 				_tracks[state->header.popup_editing_track_index-1] = _tracks[state->header.popup_editing_track_index];
@@ -1306,7 +1301,6 @@ static void g_header(void)
 			int bar = 0;
 			int tick = 0;
 			int tickpos = 0;
-			int pos = 0;
 			int last_spanpos = 0;
 			float last_spanbx = bx;
 
@@ -1355,6 +1349,7 @@ static void g_header(void)
 				}
 			}
 
+			int pos = 0;
 			while (pos <= mid->end_of_song_pos) {
 				const bool is_spanpos =
 					(state->header.drag_state == TIMESPAN_PAINT) &&
@@ -1472,6 +1467,48 @@ static void g_header(void)
 				bx += tick_dx;
 			}
 
+			for (int i0 = 1; i0 < n_rows; i0++) {
+				const float y0 = layout_y0s[i0];
+				const float y1 = layout_y0s[i0+1];
+				struct trk* trk = mid_get_trk(mid, i0-1);
+				const int nevs = arrlen(trk->mev_arr);
+				int beat_begin = -1;
+				int beat_end = -1;
+				for (int i1 = 0; i1 <= nevs; i1++) {
+					bool emit = false;
+					if (i1 < nevs) {
+						int pos = trk->mev_arr[i1].pos;
+						int beat = pos / mid->division;
+						if (beat_begin == -1) {
+							beat_begin = beat;
+							beat_end = beat;
+						} else if (beat == beat_end + 1) {
+							beat_end = beat;
+						} else if (beat > beat_end + 1) {
+							// gap
+							emit = true;
+						}
+					} else if (i1 == nevs) {
+						emit = true;
+					} else {
+						assert(!"UNREACHABLE");
+					}
+					if (emit && beat_begin >= 0) {
+						const float x0 = layout_x1 + state->beat0_x + (float)beat_begin   * state->beat_dx;
+						const float x1 = layout_x1 + state->beat0_x + (float)(beat_end+1) * state->beat_dx;
+						const float m = 0.3;
+						const float yy0 = lerp(y0, y1, m);
+						const float yy1 = lerp(y0, y1, 1.0f-m);
+						draw_list->AddRectFilled(
+							ImVec2(x0, yy0),
+							ImVec2(x1, yy1),
+							CCOL32(track_data_color));
+						beat_begin = -1;
+						beat_end = -1;
+					}
+				}
+			}
+
 			draw_list->PopClipRect();
 			ImGui::PopFont();
 		}
@@ -1489,7 +1526,7 @@ static void g_pianoroll(void)
 
 	struct mid* mid = st->myd;
 	if (st->primary_track_select >= 0) {
-		struct trk* trk = mid_get_track(mid, st->primary_track_select);
+		struct trk* trk = mid_get_trk(mid, st->primary_track_select);
 		if (trk->midi_channel == 9) {
 			is_drum_track = true;
 		}
@@ -1645,6 +1682,11 @@ static void g_pianoroll(void)
 			const int t1 = selected_timespan.end;
 			const float dt = (float)(t1-t0);
 
+			const ImVec4 c0 = CCOL(pianoroll_note_color0);
+			const ImVec4 c1 = CCOL(pianoroll_note_color1);
+			const ImU32 border_color = CCOL32(pianoroll_note_border_color);
+			const float border_size = CFLOAT(pianoroll_note_border_size);
+
 			const int n_tracks = mid_get_track_count(mid);
 			for (int pass = 0; pass < 2; pass++) {
 				if (pass == 1 && st->primary_track_select < 0) break;
@@ -1654,7 +1696,7 @@ static void g_pianoroll(void)
 					if (pass == 1 && track_index != st->primary_track_select) continue;
 					const bool is_primary = (pass == 1);
 					const bool is_other = (pass == 0);
-					struct trk* trk = mid_get_track(mid, track_index);
+					struct trk* trk = mid_get_trk(mid, track_index);
 					const bool percussive = trk->percussive;
 					struct mev* mev_arr = trk->mev_arr;
 					const int n = arrlen(mev_arr);
@@ -1667,7 +1709,10 @@ static void g_pianoroll(void)
 						const float s0 = (float)(p0 - selected_timespan.start) / dt;
 						const float x0 = clip0.x + s0 * (clip1.x - clip0.x);
 						const float y0 = clip0.y + st->key127_y + (float)(127-note) * key_size;
-						ImU32 color = ImGui::GetColorU32(ImVec4(1,0,0,is_other?0.3:1)); // XXX
+						ImVec4 cc = imvec4_lerp(c0, c1, (float)velocity / 127.0f);
+						if (is_other) cc = CCOLTX(cc, pianoroll_note_other_track_coltx);
+						const ImU32 color = ImGui::GetColorU32(cc);
+
 						if (!percussive) {
 							int p1 = mid->end_of_song_pos;
 							for (int i1 = i0+1; i1 < n; i1++) {
@@ -1682,6 +1727,9 @@ static void g_pianoroll(void)
 							if (x1 > clip0.x && x0 < clip1.x) {
 								const float y1 = y0 + key_size;
 								draw_list->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), color);
+								if (border_size > 0 && border_color > 0) {
+									draw_list->AddRect(ImVec2(x0, y0), ImVec2(x1, y1), border_color, 0, 0, border_size);
+								}
 							}
 						} else {
 							const float kh = key_size * 0.5f;
