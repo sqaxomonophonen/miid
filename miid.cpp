@@ -63,8 +63,28 @@ struct mid {
 	char* text;
 	int division;
 	int end_of_song_pos;
-	struct trk* trk_arr;
+	struct trk* _trk_arr;
 };
+
+static inline struct trk* mid_get_time_track(struct mid* mid)
+{
+	assert(arrlen(mid->_trk_arr) >= 1);
+	return &mid->_trk_arr[0];
+}
+
+static inline int mid_get_track_count(struct mid* mid)
+{
+	const int n = arrlen(mid->_trk_arr) - 1;
+	assert(n >= 0);
+	return n;
+}
+
+static inline struct trk* mid_get_track(struct mid* mid, int index)
+{
+	const int n = mid_get_track_count(mid);
+	assert(0 <= index && index < n);
+	return &mid->_trk_arr[1 + index];
+}
 
 
 static void write_file_from_arr(uint8_t* out_arr, const char* path)
@@ -403,7 +423,7 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 	struct mid* mid = (struct mid*)calloc(1, sizeof *mid);
 	mid->division = division;
 	mid->text = alloc_text_field();
-	arrsetlen(mid->trk_arr, n_tracks);
+	arrsetlen(mid->_trk_arr, n_tracks);
 
 	const int HAS_META = 1<<0, HAS_MIDI = 1<<1;
 	int* trk_flags = NULL;
@@ -431,7 +451,7 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 			return NULL;
 		}
 		int pos = 0;
-		struct trk* trk = &mid->trk_arr[track_index];
+		struct trk* trk = &mid->_trk_arr[track_index];
 		memset(trk, 0, sizeof *trk);
 		int* flags = &trk_flags[track_index];
 		*flags = 0;
@@ -700,10 +720,6 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 		}
 	}
 
-	for (int i = 1; i < n_tracks; i++) {
-		struct trk* trk = &mid->trk_arr[track_index];
-	}
-
 	#if 0
 	printf("song length: %d\n", mid->end_of_song_pos);
 	#endif
@@ -810,7 +826,7 @@ static uint8_t* mid_marshal_arr(struct mid* mid)
 		arrsetcap(bs, last_marshal_size);
 	}
 
-	const int n_tracks = arrlen(mid->trk_arr);
+	const int n_tracks = arrlen(mid->_trk_arr);
 
 	marshal_raw_string(&bs, MThd);
 	marshal_u32_be(&bs, 6);
@@ -823,7 +839,7 @@ static uint8_t* mid_marshal_arr(struct mid* mid)
 		const int MTrk_chunk_size_offset = arrlen(bs);
 		marshal_u32_be(&bs, -1); // to be written when we know...
 
-		struct trk* trk = &mid->trk_arr[track_index];
+		struct trk* trk = &mid->_trk_arr[track_index];
 
 		int cursor = 0;
 
@@ -949,7 +965,7 @@ static void track_toggle(int index)
 	struct state* state = curstate();
 	struct mid* mid = state->myd;
 	if (mid == NULL) return;
-	const int n = arrlen(mid->trk_arr);
+	const int n = mid_get_track_count(mid);
 	if (!(0 <= index && index < n)) return;
 	if (index >= ARRAY_LENGTH(state->track_select_set)) return;
 	if (state->track_select_set[index]) {
@@ -1011,8 +1027,7 @@ static void g_header(void)
 		ImGui::TableSetupColumn("timeline", ImGuiTableColumnFlags_WidthStretch);
 
 		struct mid* mid = state->myd;
-		const int n_tracks = arrlen(mid->trk_arr) - 1;
-		struct trk* tracks = &mid->trk_arr[1];
+		const int n_tracks = mid_get_track_count(mid);
 		const int n_rows = 1 + (state->header.show_tracks ? n_tracks : 0);
 
 		bool try_track_select = false;
@@ -1080,7 +1095,7 @@ static void g_header(void)
 					if (ImGui::Button("Song")) do_open_song_popup = true;
 				} else {
 					const int track_index = row_index - 1;
-					struct trk* trk = &tracks[track_index];
+					struct trk* trk = mid_get_track(mid, track_index);
 					char label[1<<9];
 					snprintf(label, sizeof label, "%s (ch%d)",
 						trk->name,
@@ -1155,7 +1170,7 @@ static void g_header(void)
 			ImGui::OpenPopup("track_edit_popup");
 		}
 		if (ImGui::BeginPopup("track_edit_popup")) {
-			struct trk* trk = &tracks[state->header.popup_editing_track_index];
+			struct trk* trk = mid_get_track(mid, state->header.popup_editing_track_index);
 			ImGui::SeparatorText("Track Edit");
 
 			ImGui::InputText("Name", trk->name, TEXT_FIELD_SIZE);
@@ -1180,19 +1195,20 @@ static void g_header(void)
 			const bool can_move_up = state->header.popup_editing_track_index > 0;
 			const bool can_move_down = state->header.popup_editing_track_index < n_tracks-1;
 			ImGui::BeginDisabled(!can_move_up);
+			struct trk* _tracks = mid_get_track(mid, 0);
 			if (ImGui::Button("Move Up")) {
-				struct trk tmp = tracks[state->header.popup_editing_track_index-1];
-				tracks[state->header.popup_editing_track_index-1] = tracks[state->header.popup_editing_track_index];
-				tracks[state->header.popup_editing_track_index] = tmp;
+				struct trk tmp = _tracks[state->header.popup_editing_track_index-1];
+				_tracks[state->header.popup_editing_track_index-1] = _tracks[state->header.popup_editing_track_index];
+				_tracks[state->header.popup_editing_track_index] = tmp;
 				state->header.popup_editing_track_index--;
 			}
 			ImGui::EndDisabled();
 			ImGui::SameLine();
 			ImGui::BeginDisabled(!can_move_down);
 			if (ImGui::Button("Down")) {
-				struct trk tmp = tracks[state->header.popup_editing_track_index+1];
-				tracks[state->header.popup_editing_track_index+1] = tracks[state->header.popup_editing_track_index];
-				tracks[state->header.popup_editing_track_index] = tmp;
+				struct trk tmp = _tracks[state->header.popup_editing_track_index+1];
+				_tracks[state->header.popup_editing_track_index+1] = _tracks[state->header.popup_editing_track_index];
+				_tracks[state->header.popup_editing_track_index] = tmp;
 				state->header.popup_editing_track_index++;
 			}
 			ImGui::EndDisabled();
@@ -1279,7 +1295,7 @@ static void g_header(void)
 
 		{
 			ImGui::PushFont(g.fonts[1]);
-			struct trk* timetrk = &mid->trk_arr[0];
+			struct trk* timetrk = mid_get_time_track(mid);
 			const int n_timetrack_events = arrlen(timetrk->mev_arr);
 			const ImVec2 reserve = ImGui::CalcTextSize("0000.0");
 			int numerator = 4;
@@ -1469,7 +1485,18 @@ static void g_pianoroll(void)
 	struct state* st = curstate();
 	const int IDLE = 0, KEY_PAN = 1;
 
-	const bool is_drum_track = false; // TODO
+	bool is_drum_track = false;
+
+	struct mid* mid = st->myd;
+	if (st->primary_track_select >= 0) {
+		struct trk* trk = mid_get_track(mid, st->primary_track_select);
+		if (trk->midi_channel == 9) {
+			is_drum_track = true;
+		}
+	}
+
+	const union timespan selected_timespan = st->selected_timespan;
+	const bool have_selected_timespan = selected_timespan.end > selected_timespan.start;
 
 	const ImVec2 avail = ImGui::GetContentRegionAvail();
 	const float table_height = avail.y - 4 - ImGui::GetFrameHeightWithSpacing();
@@ -1540,11 +1567,10 @@ static void g_pianoroll(void)
 
 		const float line_height = ImGui::GetTextLineHeight();
 		const bool print_key_labels = st->key_dy > line_height;
+		const float key_size = st->key_dy;
 
 		{
 			draw_list->PushClipRect(table_p0, table_p1);
-
-			const float key_size = st->key_dy;
 
 			const ImU32 key_label_color = CCOL32(key_label_color);
 
@@ -1610,6 +1636,64 @@ static void g_pianoroll(void)
 			draw_list->PopClipRect();
 		}
 
+		if (have_selected_timespan) {
+			ImVec2 clip0(table_p0.x + w0, table_p0.y);
+			ImVec2 clip1 = table_p1;
+			draw_list->PushClipRect(clip0, clip1);
+
+			const int t0 = selected_timespan.start;
+			const int t1 = selected_timespan.end;
+			const float dt = (float)(t1-t0);
+
+			const int n_tracks = mid_get_track_count(mid);
+			for (int pass = 0; pass < 2; pass++) {
+				if (pass == 1 && st->primary_track_select < 0) break;
+				for (int track_index = 0; track_index < n_tracks; track_index++) {
+					if (pass == 0 && !st->track_select_set[track_index]) continue;
+					if (pass == 0 && track_index == st->primary_track_select) continue;
+					if (pass == 1 && track_index != st->primary_track_select) continue;
+					const bool is_primary = (pass == 1);
+					const bool is_other = (pass == 0);
+					struct trk* trk = mid_get_track(mid, track_index);
+					const bool percussive = trk->percussive;
+					struct mev* mev_arr = trk->mev_arr;
+					const int n = arrlen(mev_arr);
+					for (int i0 = 0; i0 < n; i0++) {
+						struct mev* e0 = &mev_arr[i0];
+						if (e0->b[0] != NOTE_ON) continue;
+						uint8_t note = e0->b[1];
+						uint8_t velocity = e0->b[2];
+						int p0 = e0->pos;
+						const float s0 = (float)(p0 - selected_timespan.start) / dt;
+						const float x0 = clip0.x + s0 * (clip1.x - clip0.x);
+						const float y0 = clip0.y + st->key127_y + (float)(127-note) * key_size;
+						ImU32 color = ImGui::GetColorU32(ImVec4(1,0,0,is_other?0.3:1)); // XXX
+						if (!percussive) {
+							int p1 = mid->end_of_song_pos;
+							for (int i1 = i0+1; i1 < n; i1++) {
+								struct mev* e1 = &mev_arr[i1];
+								if ((e1->b[0] == NOTE_ON || e1->b[0] == NOTE_OFF) && e1->b[1] == note) {
+									p1 = e1->pos;
+									break;
+								}
+							}
+							const float s1 = (float)(p1 - selected_timespan.start) / dt;
+							const float x1 = clip0.x + s1 * (clip1.x - clip0.x);
+							if (x1 > clip0.x && x0 < clip1.x) {
+								const float y1 = y0 + key_size;
+								draw_list->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), color);
+							}
+						} else {
+							const float kh = key_size * 0.5f;
+							draw_list->AddCircleFilled(ImVec2(x0, y0 + kh), kh, color);
+						}
+					}
+				}
+			}
+
+			draw_list->PopClipRect();
+		}
+
 		ImGui::PopFont();
 	}
 
@@ -1626,33 +1710,9 @@ static void g_pianoroll(void)
 
 static void g_edit(void)
 {
-	g_header();
-	g_pianoroll();
-}
-
-static struct mid* mid_new(void)
-{
-	struct mid* m = new mid();
-	m->text = alloc_text_field();
-	strncpy(m->text, "TODO your song title", TEXT_FIELD_SIZE);
-	m->division = 480;
-	struct trk* trk = arraddnptr(m->trk_arr, 1);
-	memset(trk, 0, sizeof *trk);
-	trk->midi_channel = -1;
-	trk->name = alloc_text_field();
-	return m;
-}
-
-static void state_new_song(struct state* st)
-{
-	assert((st->myd == NULL) && "is myd free()'d? why is it not NULL?");
-	st->myd = mid_new();
-	st->mode0 = MODE0_EDIT;
-}
-
-static void g_root(void)
-{
 	struct state* st = curstate();
+
+	assert((st->myd != NULL) && "must have myd at this point");
 
 	if (ImGui::IsWindowFocused()) {
 		if (ImGui::IsKeyPressed(CKEY(toggle_keyjazz_tester_key))) {
@@ -1680,6 +1740,33 @@ static void g_root(void)
 	} else {
 	}
 
+	g_header();
+	g_pianoroll();
+}
+
+static struct mid* mid_new(void)
+{
+	struct mid* m = new mid();
+	m->text = alloc_text_field();
+	strncpy(m->text, "TODO your song title", TEXT_FIELD_SIZE);
+	m->division = 480;
+	struct trk* trk = arraddnptr(m->_trk_arr, 1);
+	memset(trk, 0, sizeof *trk);
+	trk->midi_channel = -1;
+	trk->name = alloc_text_field();
+	return m;
+}
+
+static void state_new_song(struct state* st)
+{
+	assert((st->myd == NULL) && "is myd free()'d? why is it not NULL?");
+	st->myd = mid_new();
+	st->mode0 = MODE0_EDIT;
+}
+
+static void g_root(void)
+{
+	struct state* st = curstate();
 	switch (st->mode0) {
 	case MODE0_EDIT:
 		g_edit();

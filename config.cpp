@@ -108,7 +108,6 @@ struct keyjazz_keymap* get_keyjazz_keymap(int index)
 	assert(index >= 0);
 	if (index >= n_keyjazz_keymaps) return NULL;
 	return &keyjazz_keymaps[index];
-
 }
 
 static void add_keyjazz_keymap(const char* s, int offset)
@@ -131,6 +130,7 @@ static void add_keyjazz_keymap(const char* s, int offset)
 
 void config_init(void)
 {
+	n_keyjazz_keymaps = 0;
 	add_keyjazz_keymap(KEYJAZZ0_KEYMAP_US, 0);
 	add_keyjazz_keymap(KEYJAZZ1_KEYMAP_US, 12);
 }
