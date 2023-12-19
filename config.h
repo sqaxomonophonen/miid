@@ -16,7 +16,7 @@ C(  track_row_hover_coltx               , ADD_RGB(0x111111)             ) \
 C(  primary_track_coltx                 , ADD_RGB(0x443355)             ) \
 C(  other_track_coltx                   , ADD_RGB(0x001166)             ) \
 C(  tick0_size                          , PX(2.0)                       ) \
-C(  tick0_color                         , RGBA(0xffffff80)              ) \
+C(  tick0_color                         , RGBA(0xffffff20)              ) \
 C(  tickn_size                          , PX(1.0)                       ) \
 C(  tickn_color                         , RGBA(0xffffff10)              ) \
 C(  bar_label_color                     , RGB(0xffff00)                 ) \

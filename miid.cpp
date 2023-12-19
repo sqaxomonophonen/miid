@@ -1606,6 +1606,8 @@ static void g_pianoroll(void)
 		const bool print_key_labels = st->key_dy > line_height;
 		const float key_size = st->key_dy;
 
+		const float table_separator = 20;
+
 		{
 			draw_list->PushClipRect(table_p0, table_p1);
 
@@ -1620,9 +1622,8 @@ static void g_pianoroll(void)
 					black = CCOL32(black_keys_color);
 					white = CCOL32(white_keys_color);
 				} else if (col == 1) {
-					const float m = 20;
-					x0 = table_p0.x + w0 + m;
-					x1 = x0 + w1 - m;
+					x0 = table_p0.x + w0 + table_separator;
+					x1 = x0 + w1 - table_separator;
 					black = CCOL32(black_pianoroll_color);
 					white = CCOL32(white_pianoroll_color);
 				} else {
@@ -1674,9 +1675,8 @@ static void g_pianoroll(void)
 		}
 
 		if (have_selected_timespan) {
-			ImVec2 clip0(table_p0.x + w0, table_p0.y);
-			ImVec2 clip1 = table_p1;
-			draw_list->PushClipRect(clip0, clip1);
+			ImVec2 clip0(table_p0.x + w0 + table_separator, table_p0.y);
+			ImVec2 clip1(clip0.x + w1 - table_separator, table_p1.y);
 
 			const int t0 = selected_timespan.start;
 			const int t1 = selected_timespan.end;
@@ -1698,6 +1698,12 @@ static void g_pianoroll(void)
 					const bool is_other = (pass == 0);
 					struct trk* trk = mid_get_trk(mid, track_index);
 					const bool percussive = trk->percussive;
+					if (percussive) {
+						const float m = key_size;
+						draw_list->PushClipRect(ImVec2(clip0.x - m, clip0.y), ImVec2(clip1.x + m, clip1.y));
+					} else {
+						draw_list->PushClipRect(clip0, clip1);
+					}
 					struct mev* mev_arr = trk->mev_arr;
 					const int n = arrlen(mev_arr);
 					for (int i0 = 0; i0 < n; i0++) {
@@ -1736,10 +1742,10 @@ static void g_pianoroll(void)
 							draw_list->AddCircleFilled(ImVec2(x0, y0 + kh), kh, color);
 						}
 					}
+
+					draw_list->PopClipRect();
 				}
 			}
-
-			draw_list->PopClipRect();
 		}
 
 		ImGui::PopFont();
