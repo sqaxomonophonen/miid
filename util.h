@@ -36,9 +36,19 @@ static inline ImVec4 imvec4_mul(ImVec4 a, ImVec4 b)
 		a.w * b.w);
 }
 
+static inline ImVec4 imvec4_scale(ImVec4 a, float s)
+{
+	return ImVec4(
+		a.x * s,
+		a.y * s,
+		a.z * s,
+		a.w * s);
+}
+
+
 static inline ImVec4 imvec4_lerp(ImVec4 a, ImVec4 b, float t)
 {
-	return imvec4_add(a, imvec4_mul(ImVec4(t,t,t,t), imvec4_sub(b, a)));
+	return imvec4_add(a, imvec4_scale(imvec4_sub(b, a), t));
 }
 
 #define UTIL_H
