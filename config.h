@@ -13,7 +13,7 @@ C(  tracks_toggle_color                 , RGB(0x008020)                 ) \
 C(  track_row_even_color                , RGB(0x111111)                 ) \
 C(  track_row_odd_color                 , RGB(0x000011)                 ) \
 C(  track_row_hover_coltx               , ADD_RGB(0x111111)             ) \
-C(  primary_track_coltx                 , ADD_RGB(0x443355)             ) \
+C(  primary_track_coltx                 , ADD_RGB(0x554400)             ) \
 C(  other_track_coltx                   , ADD_RGB(0x001166)             ) \
 C(  tick0_size                          , PX(2.0)                       ) \
 C(  tick0_color                         , RGBA(0xffffff20)              ) \
@@ -23,8 +23,8 @@ C(  bar_label_color                     , RGB(0xffff00)                 ) \
 C(  tick_label_color                    , RGB(0x555500)                 ) \
 C(  tempo_label_color                   , RGB(0xcc77cc)                 ) \
 C(  key_label_color                     , RGB(0x000000)                 ) \
-C(  timespan_top_color                  , RGB(0x554400)                 ) \
-C(  timespan_dim_color                  , RGBA(0x55440040)              ) \
+C(  timespan_top_color                  , RGB(0x665500)                 ) \
+C(  timespan_dim_color                  , RGBA(0x66550050)              ) \
 C(  track_data_color                    , RGBA(0x80ff0030)              ) \
 C(  white_keys_color                    , RGB(0x444444)                 ) \
 C(  black_keys_color                    , RGB(0x333333)                 ) \
