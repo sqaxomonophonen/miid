@@ -77,5 +77,8 @@ void config_init(void);
 #define C_DEFAULT_BEAT_WIDTH_PX (24)
 #define C_DEFAULT_KEY_HEIGHT_PX (12)
 
+int config_get_soundfont_count(void);
+char* config_get_soundfont_path(int index);
+
 #define CONFIG_H
 #endif

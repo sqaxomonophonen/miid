@@ -17,7 +17,7 @@ IMGUI_OBJS=imgui.o imgui_widgets.o imgui_tables.o imgui_draw.o imgui_impl_sdl2.o
 miid.o: miid.cpp config.h
 config.o: config.cpp config.h
 
-miid: miid.o config.o binfont.o $(IMGUI_OBJS)
+miid: main_sdl2_opengl2.o miid.o config.o binfont.o stb_ds.o $(IMGUI_OBJS)
 	$(CXX) $^ $(LDLIBS) -o $@
 
 clean:

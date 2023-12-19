@@ -1,5 +1,8 @@
 #ifndef UTIL_H
 
+#include <stdlib.h>
+#include <string.h>
+
 #include "imgui.h"
 
 #define ARRAY_LENGTH(xs) (sizeof(xs) / sizeof((xs)[0]))
@@ -50,6 +53,16 @@ static inline ImVec4 imvec4_lerp(ImVec4 a, ImVec4 b, float t)
 {
 	return imvec4_add(a, imvec4_scale(imvec4_sub(b, a), t));
 }
+
+static inline char* copystring(char* src)
+{
+	const size_t sz = strlen(src);
+	char* dst = (char*)malloc(sz+1);
+	memcpy(dst, src, sz);
+	dst[sz] = 0;
+	return dst;
+}
+
 
 #define UTIL_H
 #endif

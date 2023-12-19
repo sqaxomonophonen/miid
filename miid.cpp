@@ -4,22 +4,17 @@
 #include <errno.h>
 #include <stdint.h>
 
-#include <SDL.h>
-#include "gl.h"
-
 #include "imgui.h"
 #include "imgui_internal.h"
-#include "imgui_impl_sdl2.h"
-#include "imgui_impl_opengl2.h"
 
 #include <fluidsynth.h>
 
-#define STB_DS_IMPLEMENTATION
 #include "stb_ds.h"
 
 #include "generalmidi.h"
 #include "config.h"
 #include "util.h"
+#include "miid.h"
 
 static const char* get_drum_key(int note)
 {
@@ -31,11 +26,6 @@ static const char* get_drum_key(int note)
 	}
 	assert(!"UNREACHABLE");
 }
-
-struct soundfont {
-	char* path;
-	int error;
-};
 
 union timespan {
 	struct {
@@ -187,9 +177,6 @@ enum {
 
 struct state {
 	int mode0;
-	SDL_Window* window;
-	SDL_GLContext glctx;
-	ImGuiContext* imctx;
 	char* path;
 	struct mid* myd;
 	struct medit* medit_arr;
@@ -224,11 +211,9 @@ struct state {
 struct g {
 	bool using_audio;
 	ImFont* fonts[ARRAY_LENGTH(font_sizes)];
-	SDL_AudioDeviceID audio_device;
 	fluid_synth_t* fluid_synth;
 	int current_soundfont_index;
-	struct soundfont* soundfont_arr;
-	struct state* state_arr;
+	bool soundfont_error[1<<10];
 	struct state* curstate;
 } g;
 
@@ -243,50 +228,44 @@ static void refresh_soundfont(void)
 {
 	if (!g.using_audio) return;
 
-	const int n = arrlen(g.soundfont_arr);
+	const int n = config_get_soundfont_count();
 	if (g.current_soundfont_index >= n) {
 		g.current_soundfont_index = 0;
 	} else if (g.current_soundfont_index < 0) {
 		g.current_soundfont_index = n-1;
 	}
-	if (g.current_soundfont_index < 0) {
+	const int i = g.current_soundfont_index;
+	if (i < 0) {
 		return;
 	}
-	struct soundfont* sf = &g.soundfont_arr[g.current_soundfont_index];
-	if (sf->error) return;
+	if (i >= ARRAY_LENGTH(g.soundfont_error) || g.soundfont_error[i]) {
+		return;
+	}
+	char* path = config_get_soundfont_path(i);
 
-	const int handle = fluid_synth_sfload(g.fluid_synth, sf->path, /*reset_presets=*/1);
+	const int handle = fluid_synth_sfload(g.fluid_synth, path, /*reset_presets=*/1);
 	if (handle == FLUID_FAILED) {
-		fprintf(stderr, "WARNING: failed to load SoundFont %s\n", sf->path);
-		sf->error = 1;
+		fprintf(stderr, "WARNING: failed to load SoundFont %s\n", path);
+		g.soundfont_error[i] = true;
 		return;
 	}
 	fprintf(stderr, "INFO: loaded SoundFont #%d %s\n",
-		g.current_soundfont_index,
-		sf->path);
+		i,
+		path);
 }
 
 // via binfont.c
 extern unsigned char font_ttf[];
 extern unsigned int font_ttf_len;
 
-static void audio_callback(void* usr, Uint8* stream, int len)
+void miid_audio_callback(float* stream, int n_frames)
 {
-	memset(stream, 0, len);
-	const int n_frames = len / (2*sizeof(float));
+	const size_t fsz = 2*sizeof(float);
+	memset(stream, 0, fsz * n_frames);
 	fluid_synth_write_float(g.fluid_synth,
 		n_frames,
 		stream, 0, 2,
 		stream, 1, 2);
-}
-
-static char* copystring(char* src)
-{
-	const size_t sz = strlen(src);
-	char* dst = (char*)malloc(sz+1);
-	memcpy(dst, src, sz);
-	dst[sz] = 0;
-	return dst;
 }
 
 static int read_u8(struct blob* p)
@@ -1853,8 +1832,7 @@ static void g_root(void)
 
 static struct state* new_state(void)
 {
-	struct state* st = arraddnptr(g.state_arr, 1);
-	*st = state();
+	struct state* st = new state();
 	st->path = alloc_text_field();
 	return st;
 }
@@ -1862,16 +1840,6 @@ static struct state* new_state(void)
 ImFontAtlas* shared_font_atlas = NULL;
 static void state_common_init(struct state* st, int mode0)
 {
-	st->window = SDL_CreateWindow(
-		"MiiD",
-		SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-		1920, 1080,
-		SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI);
-	assert(st->window != NULL);
-
-	st->glctx = SDL_GL_CreateContext(st->window);
-	assert(st->glctx);
-
 	if (shared_font_atlas == NULL) {
 		shared_font_atlas = new ImFontAtlas();
 		char* MIID_TTF = getenv("MIID_TTF");
@@ -1892,13 +1860,11 @@ static void state_common_init(struct state* st, int mode0)
 		shared_font_atlas->Build();
 	}
 	assert(shared_font_atlas != NULL);
-	st->imctx = ImGui::CreateContext(shared_font_atlas);
-	ImGui::SetCurrentContext(st->imctx);
+	miidhost_create_window(st, shared_font_atlas);
+
 	ImGuiIO& io = ImGui::GetIO();
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 	ImGui::StyleColorsDark();
-	ImGui_ImplSDL2_InitForOpenGL(st->window, st->glctx);
-	ImGui_ImplOpenGL2_Init();
 
 	st->mode0 = mode0;
 }
@@ -1932,63 +1898,19 @@ static bool push_state_from_mid_blob(struct blob blob)
 	return true;
 }
 
-static Uint32 get_event_window_id(SDL_Event* e)
+void miid_init(int argc, char** argv, float sample_rate)
 {
-	switch (e->type) {
-	case SDL_WINDOWEVENT:
-		return e->window.windowID;
-	case SDL_KEYDOWN:
-	case SDL_KEYUP:
-		return e->key.windowID;
-	case SDL_TEXTEDITING:
-		return e->edit.windowID;
-	case SDL_TEXTINPUT:
-		return e->text.windowID;
-	case SDL_MOUSEMOTION:
-		return e->motion.windowID;
-	case SDL_MOUSEBUTTONDOWN:
-	case SDL_MOUSEBUTTONUP:
-		return e->button.windowID;
-	case SDL_MOUSEWHEEL:
-		return e->wheel.windowID;
-	case SDL_FINGERMOTION:
-	case SDL_FINGERDOWN:
-	case SDL_FINGERUP:
-		return e->tfinger.windowID;
-	case SDL_DROPBEGIN:
-	case SDL_DROPFILE:
-	case SDL_DROPTEXT:
-	case SDL_DROPCOMPLETE:
-		return e->drop.windowID;
-	default:
-		if (SDL_USEREVENT <= e->type && e->type < SDL_LASTEVENT) {
-			return e->user.windowID;
-		}
-		return -1;
-	}
-	assert(!"UNREACHABLE");
-}
+	g.using_audio = sample_rate > 0;
 
-int main(int argc, char** argv)
-{
-	config_init();
+	fluid_settings_t* fs = new_fluid_settings();
+	assert(fluid_settings_setnum(fs, "synth.sample-rate", sample_rate) != FLUID_FAILED);
+	assert(fluid_settings_setstr(fs, "synth.midi-bank-select", "gs") != FLUID_FAILED);
+	assert(fluid_settings_setint(fs, "synth.polyphony", 256) != FLUID_FAILED);
+	assert(fluid_settings_setint(fs, "synth.threadsafe-api", 1) != FLUID_FAILED);
+	g.fluid_synth = new_fluid_synth(fs);
 
-	char* MIID_SF2 = getenv("MIID_SF2");
-	if (MIID_SF2 == NULL || strlen(MIID_SF2) == 0) {
-		fprintf(stderr, "WARNING: disabling audio because MIID_SF2 is not set (should contain colon-separated list of paths to SoundFonts)\n");
-	} else {
-		g.using_audio = true;
-	}
-
-	assert(SDL_Init(SDL_INIT_TIMER | (g.using_audio?SDL_INIT_AUDIO:0) | SDL_INIT_VIDEO) == 0);
-	atexit(SDL_Quit);
-
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 1);
-
-	IMGUI_CHECKVERSION();
+	g.current_soundfont_index = 0;
+	refresh_soundfont();
 
 	if (argc == 1) {
 		push_state_blank();
@@ -2007,112 +1929,29 @@ int main(int argc, char** argv)
 		}
 	}
 
-	if (g.using_audio) {
-		SDL_AudioSpec have = {0}, want = {0};
-		want.freq = 48000;
-		want.format = AUDIO_F32;
-		want.channels = 2;
-		want.samples = 1024;
-		want.callback = audio_callback;
-		g.audio_device = SDL_OpenAudioDevice(NULL, 0, &want, &have, SDL_AUDIO_ALLOW_FORMAT_CHANGE);
-		assert((g.audio_device > 0) && "failed to open audio device");
-		assert(have.channels == want.channels);
+}
 
-		fluid_settings_t* fs = new_fluid_settings();
-		assert(fluid_settings_setnum(fs, "synth.sample-rate", have.freq) != FLUID_FAILED);
-		assert(fluid_settings_setstr(fs, "synth.midi-bank-select", "gs") != FLUID_FAILED);
-		assert(fluid_settings_setint(fs, "synth.polyphony", 256) != FLUID_FAILED);
-		assert(fluid_settings_setint(fs, "synth.threadsafe-api", 1) != FLUID_FAILED);
-		g.fluid_synth = new_fluid_synth(fs);
+bool miid_frame(void* usr, bool request_close)
+{
+	struct state* st = (struct state*)usr;
+	g.curstate = st;
 
-		char* cp = copystring(MIID_SF2);
-		char* p = cp;
-		for (;;) {
-			char* p0 = p;
-			while (*p && *p != ':') p++;
-			const int is_last = (*p == 0);
-			*p = 0;
-			char* path = copystring(p0);
-			arrput(g.soundfont_arr, ((struct soundfont) {
-				.path = path,
-			}));
-			if (is_last) break;
-			p++;
-		}
-		free(cp);
-
-		g.current_soundfont_index = 0;
-		refresh_soundfont();
-
-		SDL_PauseAudioDevice(g.audio_device, 0);
+	ImGuiIO& io = ImGui::GetIO();
+	const ImGuiWindowFlags root_window_flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground;
+	ImGui::SetNextWindowPos(ImVec2(0,0));
+	ImGui::SetNextWindowSize(io.DisplaySize);
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0,0));
+	if (ImGui::Begin("root", NULL, root_window_flags)) {
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImGuiStyle().WindowPadding);
+		ImGui::PushFont(g.fonts[0]);
+		g_root();
+		ImGui::PopFont();
+		ImGui::PopStyleVar();
+		ImGui::End();
 	}
+	ImGui::PopStyleVar();
 
-	int exiting = 0;
-	while (!exiting) {
-		const int n_states = arrlen(g.state_arr);
-		if (n_states == 0) break;
-		SDL_Event e;
-		while (SDL_PollEvent(&e)) {
-			if (e.type == SDL_QUIT) {
-				exiting = 1;
-			}
-			Uint32 window_id = get_event_window_id(&e);
-			for (int i = 0; i < n_states; i++) {
-				struct state* st = &g.state_arr[i];
-				if (SDL_GetWindowID(st->window) != window_id) continue;
-				if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_CLOSE) {
-					st->mode0 = MODE0_DO_CLOSE;
-				} else {
-					ImGui::SetCurrentContext(st->imctx);
-					ImGui_ImplSDL2_ProcessEvent(&e);
-				}
-				break;
-			}
-		}
+	if (request_close) st->mode0 = MODE0_DO_CLOSE; // TODO?
 
-		for (int i = 0; i < n_states; i++) {
-			struct state* st = g.curstate = &g.state_arr[i];
-
-			if (st->mode0 == MODE0_DO_CLOSE) {
-				ImGui::DestroyContext(st->imctx);
-				SDL_GL_DeleteContext(st->glctx);
-				SDL_DestroyWindow(st->window);
-				// FIXME leaking st->myd, and more?
-				arrdel(g.state_arr, i);
-				break; // restart main loop
-			}
-
-			SDL_GL_MakeCurrent(st->window, st->glctx);
-			ImGui::SetCurrentContext(st->imctx);
-
-			ImGuiIO& io = ImGui::GetIO();
-
-			ImGui_ImplOpenGL2_NewFrame();
-			ImGui_ImplSDL2_NewFrame();
-			ImGui::NewFrame();
-
-			const ImGuiWindowFlags root_window_flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground;
-			ImGui::SetNextWindowPos(ImVec2(0,0));
-			ImGui::SetNextWindowSize(io.DisplaySize);
-			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0,0));
-			if (ImGui::Begin("root", NULL, root_window_flags)) {
-				ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImGuiStyle().WindowPadding);
-				ImGui::PushFont(g.fonts[0]);
-				g_root();
-				ImGui::PopFont();
-				ImGui::PopStyleVar();
-				ImGui::End();
-			}
-			ImGui::PopStyleVar();
-
-			ImGui::Render();
-			glViewport(0, 0, (int)io.DisplaySize.x, (int)io.DisplaySize.y);
-			glClearColor(0, 0, 0, 0);
-			glClear(GL_COLOR_BUFFER_BIT);
-			ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
-			SDL_GL_SwapWindow(st->window);
-		}
-	}
-
-	return EXIT_SUCCESS;
+	return st->mode0 == MODE0_DO_CLOSE;
 }

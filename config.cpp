@@ -1,4 +1,7 @@
+#include <stdio.h>
 #include <assert.h>
+
+#include "stb_ds.h"
 
 #include "config.h"
 #include "util.h"
@@ -131,9 +134,43 @@ static void add_keyjazz_keymap(const char* s, int offset)
 	}
 }
 
+char** sf2_arr;
+
 void config_init(void)
 {
 	n_keyjazz_keymaps = 0;
 	add_keyjazz_keymap(KEYJAZZ0_KEYMAP_US, 0);
 	add_keyjazz_keymap(KEYJAZZ1_KEYMAP_US, 12);
+
+	bool using_audio = false;
+	char* MIID_SF2 = getenv("MIID_SF2");
+	if (MIID_SF2 == NULL || strlen(MIID_SF2) == 0) {
+		fprintf(stderr, "NOTE: disabling audio because MIID_SF2 is not set (should contain colon-separated list of paths to SoundFonts)\n");
+	} else {
+		using_audio = true;
+	}
+
+	char* cp = copystring(MIID_SF2);
+	char* p = cp;
+	for (;;) {
+		char* p0 = p;
+		while (*p && *p != ':') p++;
+		const int is_last = (*p == 0);
+		*p = 0;
+		char* path = copystring(p0);
+		arrput(sf2_arr, path);
+		if (is_last) break;
+		p++;
+	}
+	free(cp);
+}
+
+int config_get_soundfont_count(void)
+{
+	return arrlen(sf2_arr);
+}
+
+char* config_get_soundfont_path(int index)
+{
+	return sf2_arr[index];
 }
