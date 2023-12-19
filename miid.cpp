@@ -1621,7 +1621,7 @@ static void g_pianoroll(void)
 							if (k == '#') {
 								sep = "#";
 								assert(note > 0);
-								k = KEYS[(note-1) % 12];
+								k = KEYS[(note+11) % 12];
 							}
 							const int octave = (note/12)-1;
 							snprintf(buf, sizeof buf, "%c%s%d", k, sep, octave);
