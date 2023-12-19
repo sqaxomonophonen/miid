@@ -616,7 +616,7 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 						return NULL;
 					}
 				}
-				mev.b[0] = b0;
+				mev.b[0] = b0 & 0xf0; // remove channel (channel is fixed for entire track)
 				for (int i = 0; i < nstd; i++) {
 					int v = read_u8(&p);
 					if (v < 0 || v >= 0x80) {
