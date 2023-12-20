@@ -977,6 +977,75 @@ static inline float mouse_wheel_scalar(float wheel)
 	return powf(lerp(1.001f, 1.4f, CFLOAT(wheel_sensitivity)), wheel);
 }
 
+struct note_render {
+	// setup
+	int end_pos;
+	float t0;
+	float t1;
+	float _dt1;
+	float clip0x;
+	float clip1x;
+
+	// current track
+	struct mev* mevs;
+	int n_mevs;
+	bool percussive;
+
+	// outputs
+	float x0,x1;
+	uint8_t note, velocity;
+};
+
+static void note_render_init(struct note_render* r, int end_pos, float t0, float t1, float clip0x, float clip1x)
+{
+	memset(r, 0, sizeof *r);
+	r->end_pos = end_pos;
+	r->t0 = t0;
+	r->t1 = t1;
+	r->_dt1 = 1.0f / (t1-t0);
+	r->clip0x = clip0x;
+	r->clip1x = clip1x;
+}
+
+static void note_render_do_mevs(struct note_render* r, struct mev* mevs, int n_mevs, bool percussive)
+{
+	r->mevs = mevs;
+	r->n_mevs = n_mevs;
+	r->percussive = percussive;
+}
+
+static inline bool note_render_next(struct note_render* r)
+{
+	assert(r->n_mevs >= 0);
+	while (r->n_mevs > 0) {
+		struct mev* e0 = r->mevs++;
+		r->n_mevs--;
+		if (e0->b[0] != NOTE_ON) continue;
+		r->note = e0->b[1];
+		r->velocity = e0->b[2];
+		const int p0 = e0->pos;
+		r->x0 = lerp(r->clip0x, r->clip1x, (float)((float)p0 - r->t0) * r->_dt1);
+		if (!r->percussive) {
+			int p1 = r->end_pos;
+			// NOTE: mevs/n_mevs have been incremented/decremented at this point
+			for (int i = 0; i < r->n_mevs; i++) {
+				struct mev* e1 = &r->mevs[i];
+				if ((e1->b[0] == NOTE_ON || e1->b[0] == NOTE_OFF) && e1->b[1] == r->note) {
+					p1 = e1->pos;
+					break;
+				}
+			}
+			r->x1 = lerp(r->clip0x, r->clip1x, (float)(p1 - r->t0) * r->_dt1);
+		} else {
+			r->x1 = r->x0 + 1;
+		}
+		return true;
+
+	}
+	return false;
+}
+
+
 static void g_header(void)
 {
 	const int IDLE=0, TIMESPAN_PAINT=1, TIME_PAN=2;
@@ -1446,44 +1515,33 @@ static void g_header(void)
 				bx += tick_dx;
 			}
 
+			struct note_render nr;
+			const float t0 = (-state->beat0_x / state->beat_dx) * (float)mid->division;
+			const float t1 = t0 + ((clip1.x - clip0.x) / state->beat_dx) * (float)mid->division;
+			note_render_init(&nr, mid->end_of_song_pos, t0, t1, clip0.x, clip1.x);
+			const int nmod = 12; // FIXME?
+			const ImVec4 c0 = CCOL(pianoroll_note_color0);
+			const ImVec4 c1 = CCOL(pianoroll_note_color1);
 			for (int i0 = 1; i0 < n_rows; i0++) {
 				const float y0 = layout_y0s[i0];
 				const float y1 = layout_y0s[i0+1];
 				struct trk* trk = mid_get_trk(mid, i0-1);
-				const int nevs = arrlen(trk->mev_arr);
-				int beat_begin = -1;
-				int beat_end = -1;
-				for (int i1 = 0; i1 <= nevs; i1++) {
-					bool emit = false;
-					if (i1 < nevs) {
-						int pos = trk->mev_arr[i1].pos;
-						int beat = pos / mid->division;
-						if (beat_begin == -1) {
-							beat_begin = beat;
-							beat_end = beat;
-						} else if (beat == beat_end + 1) {
-							beat_end = beat;
-						} else if (beat > beat_end + 1) {
-							// gap
-							emit = true;
-						}
-					} else if (i1 == nevs) {
-						emit = true;
+				const bool percussive = trk->percussive;
+				note_render_do_mevs(&nr, trk->mev_arr, arrlen(trk->mev_arr), percussive);
+				while (note_render_next(&nr)) {
+					const float x0 = nr.x0;
+					const float x1 = nr.x1;
+					const int note = (int)nr.note % nmod;
+					const float y = y0 + (nmod - 1 - note) + 0.5f*((y1-y0)-getsz(1)); // XXX scale?
+					ImVec4 cc = imvec4_lerp(c0, c1, (float)nr.velocity / 127.0f);
+					const ImU32 color = ImGui::GetColorU32(cc);
+					if (percussive) {
+						draw_list->AddCircleFilled(ImVec2(x0,y), 2, color);
 					} else {
-						assert(!"UNREACHABLE");
-					}
-					if (emit && beat_begin >= 0) {
-						const float x0 = layout_x1 + state->beat0_x + (float)beat_begin   * state->beat_dx;
-						const float x1 = layout_x1 + state->beat0_x + (float)(beat_end+1) * state->beat_dx;
-						const float m = 0.3;
-						const float yy0 = lerp(y0, y1, m);
-						const float yy1 = lerp(y0, y1, 1.0f-m);
 						draw_list->AddRectFilled(
-							ImVec2(x0, yy0),
-							ImVec2(x1, yy1),
-							CCOL32(track_data_color));
-						beat_begin = -1;
-						beat_end = -1;
+							ImVec2(x0, y-0.5),
+							ImVec2(x1, y+0.5),
+							color);
 					}
 				}
 			}
@@ -1494,72 +1552,6 @@ static void g_header(void)
 	}
 
 	state->header.hover_row_index = new_hover_row_index;
-}
-
-struct note_render {
-	// setup
-	int end_pos;
-	float t0;
-	float t1;
-	float _dt1;
-	float clip0x;
-	float clip1x;
-
-	// current track
-	struct mev* mevs;
-	int n_mevs;
-	bool percussive;
-
-	// outputs
-	float x0,x1;
-	uint8_t note, velocity;
-};
-
-static void note_render_init(struct note_render* r, int end_pos, float t0, float t1, float clip0x, float clip1x)
-{
-	memset(r, 0, sizeof *r);
-	r->end_pos = end_pos;
-	r->t0 = t0;
-	r->t1 = t1;
-	r->_dt1 = 1.0f / (t1-t0);
-	r->clip0x = clip0x;
-	r->clip1x = clip1x;
-}
-
-static void note_render_do_mevs(struct note_render* r, struct mev* mevs, int n_mevs, bool percussive)
-{
-	r->mevs = mevs;
-	r->n_mevs = n_mevs;
-	r->percussive = percussive;
-}
-
-static inline bool note_render_next(struct note_render* r)
-{
-	assert(r->n_mevs >= 0);
-	while (r->n_mevs > 0) {
-		struct mev* e0 = r->mevs++;
-		r->n_mevs--;
-		if (e0->b[0] != NOTE_ON) continue;
-		r->note = e0->b[1];
-		r->velocity = e0->b[2];
-		const int p0 = e0->pos;
-		r->x0 = lerp(r->clip0x, r->clip1x, (float)((float)p0 - r->t0) * r->_dt1);
-		if (!r->percussive) {
-			int p1 = r->end_pos;
-			// NOTE: mevs/n_mevs have been incremented/decremented at this point
-			for (int i = 0; i < r->n_mevs; i++) {
-				struct mev* e1 = &r->mevs[i];
-				if ((e1->b[0] == NOTE_ON || e1->b[0] == NOTE_OFF) && e1->b[1] == r->note) {
-					p1 = e1->pos;
-					break;
-				}
-			}
-			r->x1 = lerp(r->clip0x, r->clip1x, (float)(p1 - r->t0) * r->_dt1);
-		}
-		return true;
-
-	}
-	return false;
 }
 
 static void g_pianoroll(void)

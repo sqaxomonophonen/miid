@@ -14,8 +14,8 @@ C(  tracks_toggle_color                 , RGB(0x008020)                 ) \
 C(  track_row_even_color                , RGB(0x111111)                 ) \
 C(  track_row_odd_color                 , RGB(0x000011)                 ) \
 C(  track_row_hover_coltx               , ADD_RGB(0x111111)             ) \
-C(  primary_track_coltx                 , ADD_RGB(0x554400)             ) \
-C(  other_track_coltx                   , ADD_RGB(0x001166)             ) \
+C(  primary_track_coltx                 , ADD_RGB(0x332200)             ) \
+C(  other_track_coltx                   , ADD_RGB(0x002233)             ) \
 C(  tick0_size                          , PX(2.0)                       ) \
 C(  tick0_color                         , RGBA(0xffffff20)              ) \
 C(  tickn_size                          , PX(1.0)                       ) \
