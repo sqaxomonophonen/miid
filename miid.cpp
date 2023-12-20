@@ -1287,6 +1287,18 @@ static void g_header(void)
 
 			const bool click_lmb = is_hover && ImGui::IsMouseClicked(0);
 			const bool click_rmb = is_hover && ImGui::IsMouseClicked(1);
+			const bool doubleclick_rmb = is_hover && ImGui::IsMouseDoubleClicked(1);
+			const float t0 = (float)state->selected_timespan.start / (float)mid->division;
+			const float t1 = (float)state->selected_timespan.end   / (float)mid->division;
+			if (doubleclick_rmb && t1 > t0) {
+				const float x0 = layout_x1;
+				const float x1 = x0 + sz.x;
+				const float s = lerp(0.0f, 0.49f, CFLOAT(time_fit_padding));
+				const float vx0 = lerp(x0, x1, s);
+				const float vx1 = lerp(x0, x1, 1.0f-s);
+				state->beat_dx = (vx1-vx0) / (t1-t0);
+				state->beat0_x = -t0 * state->beat_dx + (vx0 - x0);
+			}
 
 			if (!is_drag && state->header.drag_state > IDLE) {
 				state->header.drag_state = IDLE;
