@@ -36,6 +36,8 @@ C(  pianoroll_note_color1               , RGBA(0xff80ffff)              ) \
 C(  pianoroll_note_border_color         , RGBA(0x00000077)              ) \
 C(  pianoroll_note_border_size          , PX(1)                         ) \
 C(  pianoroll_note_other_track_coltx    , MUL_RGBA(0x4080ff80)          ) \
+C(  percussion_line_width               , PX(3)                         ) \
+C(  percussion_dot_radius               , PX(5)                         ) \
 C(  toggle_keyjazz_tester_key           , KEY(ImGuiKey_GraveAccent)     ) \
 C(  END                                 , NONE                          )
 

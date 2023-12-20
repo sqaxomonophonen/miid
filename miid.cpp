@@ -1660,6 +1660,7 @@ static void g_pianoroll(void)
 		if (have_selected_timespan) {
 			const ImVec2 clip0(table_p0.x + w0 + table_separator, table_p0.y);
 			const ImVec2 clip1(clip0.x + w1 - table_separator,    table_p1.y);
+			draw_list->PushClipRect(clip0, clip1);
 
 			const int t0 = selected_timespan.start;
 			const int t1 = selected_timespan.end;
@@ -1683,12 +1684,6 @@ static void g_pianoroll(void)
 					const bool is_other = (pass == 0);
 					struct trk* trk = mid_get_trk(mid, track_index);
 					const bool percussive = trk->percussive;
-					if (percussive) {
-						const float m = key_size;
-						draw_list->PushClipRect(ImVec2(clip0.x - m, clip0.y), ImVec2(clip1.x + m, clip1.y));
-					} else {
-						draw_list->PushClipRect(clip0, clip1);
-					}
 					struct mev* mev_arr = trk->mev_arr;
 					const int n = arrlen(mev_arr);
 					for (int i0 = 0; i0 < n; i0++) {
@@ -1700,6 +1695,7 @@ static void g_pianoroll(void)
 						const float s0 = (float)(p0 - selected_timespan.start) / dt;
 						const float x0 = clip0.x + s0 * (clip1.x - clip0.x);
 						const float y0 = clip0.y + st->key127_y + (float)(127-note) * key_size;
+						const float y1 = y0 + key_size;
 						ImVec4 cc = imvec4_lerp(c0, c1, (float)velocity / 127.0f);
 						if (is_other) cc = CCOLTX(cc, pianoroll_note_other_track_coltx);
 						const ImU32 color = ImGui::GetColorU32(cc);
@@ -1718,7 +1714,6 @@ static void g_pianoroll(void)
 							const float s1 = (float)(p1 - selected_timespan.start) / dt;
 							const float x1 = clip0.x + s1 * (clip1.x - clip0.x);
 							if (x1 > clip0.x && x0 < clip1.x) {
-								const float y1 = y0 + key_size;
 								draw_list->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), color);
 								if (border_size > 0 && border_color > 0) {
 									draw_list->AddRect(ImVec2(x0, y0), ImVec2(x1, y1), border_color, 0, 0, border_size);
@@ -1726,10 +1721,17 @@ static void g_pianoroll(void)
 								}
 							}
 						} else {
-							if (x0 > (clip0.x - key_size) && x0 < clip1.x + key_size) {
-								const float kh = key_size * 0.5f;
-								draw_list->AddCircleFilled(ImVec2(x0, y0 + kh), kh, color);
-								is_visible = true;
+							if (x0 >= clip0.x && x0 <= clip1.x) {
+								const float m = CFLOAT(percussion_line_width);
+								if (m > 0) {
+									draw_list->AddRectFilled(ImVec2(x0-m, y0), ImVec2(x0+m, y1), color);
+									is_visible = true;
+								}
+								const float r = CFLOAT(percussion_dot_radius);
+								if (r > 0) {
+									draw_list->AddCircleFilled(ImVec2(x0, (y0+y1)*0.5f), r, color);
+									is_visible = true;
+								}
 							}
 						}
 
@@ -1744,9 +1746,10 @@ static void g_pianoroll(void)
 						}
 					}
 
-					draw_list->PopClipRect();
 				}
 			}
+
+			draw_list->PopClipRect();
 
 			if (try_note_fit && note_min != -1) {
 				const float s = lerp(0.0f, 0.4f, CFLOAT(note_fit_padding));
