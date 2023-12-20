@@ -1496,6 +1496,72 @@ static void g_header(void)
 	state->header.hover_row_index = new_hover_row_index;
 }
 
+struct note_render {
+	// setup
+	int end_pos;
+	float t0;
+	float t1;
+	float _dt1;
+	float clip0x;
+	float clip1x;
+
+	// current track
+	struct mev* mevs;
+	int n_mevs;
+	bool percussive;
+
+	// outputs
+	float x0,x1;
+	uint8_t note, velocity;
+};
+
+static void note_render_init(struct note_render* r, int end_pos, float t0, float t1, float clip0x, float clip1x)
+{
+	memset(r, 0, sizeof *r);
+	r->end_pos = end_pos;
+	r->t0 = t0;
+	r->t1 = t1;
+	r->_dt1 = 1.0f / (t1-t0);
+	r->clip0x = clip0x;
+	r->clip1x = clip1x;
+}
+
+static void note_render_do_mevs(struct note_render* r, struct mev* mevs, int n_mevs, bool percussive)
+{
+	r->mevs = mevs;
+	r->n_mevs = n_mevs;
+	r->percussive = percussive;
+}
+
+static inline bool note_render_next(struct note_render* r)
+{
+	assert(r->n_mevs >= 0);
+	while (r->n_mevs > 0) {
+		struct mev* e0 = r->mevs++;
+		r->n_mevs--;
+		if (e0->b[0] != NOTE_ON) continue;
+		r->note = e0->b[1];
+		r->velocity = e0->b[2];
+		const int p0 = e0->pos;
+		r->x0 = lerp(r->clip0x, r->clip1x, (float)((float)p0 - r->t0) * r->_dt1);
+		if (!r->percussive) {
+			int p1 = r->end_pos;
+			// NOTE: mevs/n_mevs have been incremented/decremented at this point
+			for (int i = 0; i < r->n_mevs; i++) {
+				struct mev* e1 = &r->mevs[i];
+				if ((e1->b[0] == NOTE_ON || e1->b[0] == NOTE_OFF) && e1->b[1] == r->note) {
+					p1 = e1->pos;
+					break;
+				}
+			}
+			r->x1 = lerp(r->clip0x, r->clip1x, (float)(p1 - r->t0) * r->_dt1);
+		}
+		return true;
+
+	}
+	return false;
+}
+
 static void g_pianoroll(void)
 {
 	struct state* st = curstate();
@@ -1671,6 +1737,9 @@ static void g_pianoroll(void)
 			const ImU32 border_color = CCOL32(pianoroll_note_border_color);
 			const float border_size = CFLOAT(pianoroll_note_border_size);
 
+			struct note_render nr;
+			note_render_init(&nr, mid->end_of_song_pos, t0, t1, clip0.x, clip1.x);
+
 			int note_min = -1;
 			int note_max = -1;
 			const int n_tracks = mid_get_track_count(mid);
@@ -1680,45 +1749,30 @@ static void g_pianoroll(void)
 					if (pass == 0 && !st->track_select_set[track_index]) continue;
 					if (pass == 0 && track_index == st->primary_track_select) continue;
 					if (pass == 1 && track_index != st->primary_track_select) continue;
-					const bool is_primary = (pass == 1);
+					//const bool is_primary = (pass == 1);
 					const bool is_other = (pass == 0);
+
 					struct trk* trk = mid_get_trk(mid, track_index);
 					const bool percussive = trk->percussive;
-					struct mev* mev_arr = trk->mev_arr;
-					const int n = arrlen(mev_arr);
-					for (int i0 = 0; i0 < n; i0++) {
-						struct mev* e0 = &mev_arr[i0];
-						if (e0->b[0] != NOTE_ON) continue;
-						uint8_t note = e0->b[1];
-						uint8_t velocity = e0->b[2];
-						int p0 = e0->pos;
-						const float s0 = (float)(p0 - selected_timespan.start) / dt;
-						const float x0 = clip0.x + s0 * (clip1.x - clip0.x);
-						const float y0 = clip0.y + st->key127_y + (float)(127-note) * key_size;
-						const float y1 = y0 + key_size;
-						ImVec4 cc = imvec4_lerp(c0, c1, (float)velocity / 127.0f);
+					note_render_do_mevs(&nr, trk->mev_arr, arrlen(trk->mev_arr), percussive);
+
+					while (note_render_next(&nr)) {
+						const float x0 = nr.x0;
+						const float x1 = nr.x1;
+						const int note = nr.note;
+						const float y0 = clip0.y + st->key127_y + (float)(127-note) * st->key_dy;
+						const float y1 = y0 + st->key_dy;
+						ImVec4 cc = imvec4_lerp(c0, c1, (float)nr.velocity / 127.0f);
 						if (is_other) cc = CCOLTX(cc, pianoroll_note_other_track_coltx);
 						const ImU32 color = ImGui::GetColorU32(cc);
-
 						bool is_visible = false;
-
 						if (!percussive) {
-							int p1 = mid->end_of_song_pos;
-							for (int i1 = i0+1; i1 < n; i1++) {
-								struct mev* e1 = &mev_arr[i1];
-								if ((e1->b[0] == NOTE_ON || e1->b[0] == NOTE_OFF) && e1->b[1] == note) {
-									p1 = e1->pos;
-									break;
-								}
-							}
-							const float s1 = (float)(p1 - selected_timespan.start) / dt;
-							const float x1 = clip0.x + s1 * (clip1.x - clip0.x);
 							if (x1 > clip0.x && x0 < clip1.x) {
 								draw_list->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), color);
 								if (border_size > 0 && border_color > 0) {
 									draw_list->AddRect(ImVec2(x0, y0), ImVec2(x1, y1), border_color, 0, 0, border_size);
-									is_visible = true;
 								}
+								is_visible = true;
 							}
 						} else {
 							if (x0 >= clip0.x && x0 <= clip1.x) {
@@ -1734,7 +1788,6 @@ static void g_pianoroll(void)
 								}
 							}
 						}
-
 						if (is_visible) {
 							if (note_min == -1) {
 								note_min = note;
@@ -1745,7 +1798,6 @@ static void g_pianoroll(void)
 							}
 						}
 					}
-
 				}
 			}
 
