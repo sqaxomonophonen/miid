@@ -438,8 +438,6 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 		int end_of_track = 0;
 		int last_b0 = -1;
 		int current_midi_channel = -1;
-		int n_note_on = 0;
-		int n_note_off = 0;
 		while (remaining > 0) {
 			if (end_of_track) {
 				fprintf(stderr, "ERROR: premature end of track marker\n");
@@ -566,10 +564,8 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 					emit_mev = 1;
 				}
 			} else if (h0 == NOTE_OFF) {
-				n_note_off++;
 				nstd = 2;
 			} else if (h0 == NOTE_ON) {
-				n_note_on++;
 				nstd = 2;
 			} else if (h0 == POLY_AFTERTOUCH) {
 				nstd = 2;
@@ -661,6 +657,20 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 			assert(trk->midi_channel >= 0);
 		}
 
+		int n_note_on = 0;
+		int n_note_off = 0;
+		for (struct mev* e = trk->mev_arr; e < trk->mev_arr + arrlen(trk->mev_arr); e++) {
+			if (e->b[0] == NOTE_ON && e->b[2] == 0) {
+				// XXX is this appropriate? is it a trk
+				// "config" like "percussion"? does fluidsynth
+				// play it differently?
+				e->b[0] = NOTE_OFF;
+			}
+			switch (e->b[0]) {
+			case NOTE_ON:  n_note_on++;  break;
+			case NOTE_OFF: n_note_off++; break;
+			}
+		}
 		if (n_note_on > 0 && n_note_off == 0) {
 			trk->percussive = true;
 		}
