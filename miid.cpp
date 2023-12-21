@@ -1167,33 +1167,36 @@ static void g_header(void)
 					if (ImGui::Button("Loop")) {
 					}
 
-					if (state->header.track_show_mode == SHOW_ALL_TRACKS) {
-						if (ImGui::Button("A")) {
-							if (n_selected_tracks > 0) {
-								for (int i = 0; i < n_tracks; i++) {
-									state->track_show_set[i] = state->track_select_set[i];
+					{
+						const char* showing = NULL;
+						if (state->header.track_show_mode == SHOW_ALL_TRACKS) {
+							if (ImGui::Button("A")) {
+								if (n_selected_tracks > 0) {
+									for (int i = 0; i < n_tracks; i++) {
+										state->track_show_set[i] = state->track_select_set[i];
+									}
+									set_new_track_show_mode = SHOW_SELECTED_TRACKS;
+								} else {
+									set_new_track_show_mode = SHOW_NO_TRACKS;
 								}
-								set_new_track_show_mode = SHOW_SELECTED_TRACKS;
-							} else {
+							}
+							showing = "all tracks";
+						} else if (state->header.track_show_mode == SHOW_SELECTED_TRACKS) {
+							if (ImGui::Button("S")) {
 								set_new_track_show_mode = SHOW_NO_TRACKS;
 							}
+							showing = "selected tracks";
+						} else if (state->header.track_show_mode == SHOW_NO_TRACKS) {
+							if (ImGui::Button("N")) {
+								set_new_track_show_mode = SHOW_ALL_TRACKS;
+							}
+							showing = "no tracks";
+						} else {
+							assert(!"UNREACHABLE");
 						}
-						MaybeSetItemTooltip("Showing all tracks");
-					} else if (state->header.track_show_mode == SHOW_SELECTED_TRACKS) {
-						if (ImGui::Button("S")) {
-							set_new_track_show_mode = SHOW_NO_TRACKS;
-						}
-						MaybeSetItemTooltip("Showing selected tracks");
-					} else if (state->header.track_show_mode == SHOW_NO_TRACKS) {
-						if (ImGui::Button("N")) {
-							set_new_track_show_mode = SHOW_ALL_TRACKS;
-						}
-						MaybeSetItemTooltip("Showing no tracks");
-					} else {
-						assert(!"UNREACHABLE");
-					}
 
-					MaybeSetItemTooltip("Toggle track rows visibility");
+						MaybeSetItemTooltip("Toggle track visibility mode (showing: %s)", showing);
+					}
 
 					ImGui::SameLine();
 
