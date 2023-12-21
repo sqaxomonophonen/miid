@@ -1150,22 +1150,19 @@ static void g_header(void)
 					const int track_index = row_index - 1;
 					struct trk* trk = mid_get_trk(mid, track_index);
 					char label[1<<9];
-					snprintf(label, sizeof label, "%s (ch%d)",
+					snprintf(label, sizeof label, "%s (ch%d)##%d",
 						trk->name,
-						trk->midi_channel+1);
-
-					const ImVec2 save = ImGui::GetCursorPos();
-					ImGui::TextUnformatted(label);
-					ImGui::SetCursorPos(save);
-					const ImVec2 sz = ImVec2(ImGui::GetColumnWidth(), getsz(1));
-					ImGui::InvisibleButton("table_header", sz, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
-					if (ImGui::IsItemHovered()) {
-						if (ImGui::IsMouseClicked(0)) {
-							try_track_select = true;
-						} else if (ImGui::IsMouseClicked(1)) {
+						trk->midi_channel+1,
+						track_index);
+					const ImVec2 sz = ImVec2(ImGui::GetColumnWidth(), getsz(1)+4);
+					if (ImGui::ButtonEx(label, sz, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight)) {
+						if (ImGui::IsMouseReleased(0)) {
+							track_toggle(track_index);
+						} else if (ImGui::IsMouseReleased(1)) {
 							do_popup_editing_track_index = track_index;
 						}
 					}
+					ImGui::SetItemTooltip("Left-click: toggle. Right-click: edit");
 				}
 			}
 
