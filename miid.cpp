@@ -1068,7 +1068,7 @@ static void g_header(void)
 	ImGuiIO& io = ImGui::GetIO();
 	const ImVec2 table_p0 = ImGui::GetCursorScreenPos();
 	int new_hover_row_index = -1;
-	bool reset_selected_timespan = false;
+	bool reset_selection = false;
 	int do_popup_editing_track_index = -1;
 	bool do_open_op_popup = false;
 	bool do_open_song_popup = false;
@@ -1299,7 +1299,7 @@ static void g_header(void)
 				state->header.drag_state = IDLE;
 			} else if (click_lmb) {
 				const float my = io.MousePos.y;
-				reset_selected_timespan = !io.KeyShift;
+				reset_selection = !io.KeyShift;
 				if (layout_y0s[0] <= my && my < layout_y0s[1]) {
 					state->header.drag_state = TIME_PAINT;
 				} else {
@@ -1365,13 +1365,18 @@ static void g_header(void)
 			const bool is_time_painting = (state->header.drag_state == TIME_PAINT) || (state->header.drag_state == TIMETRACK_PAINT);
 
 			if (is_track_painting && new_hover_row_index >= 1) {
+				if (reset_selection) {
+					for (int i = 0; i < n_tracks; i++) {
+						state->track_select_set[i] = false;
+					}
+				}
 				const int track_index = new_hover_row_index - 1;
 				state->primary_track_select = track_index;
 				state->track_select_set[track_index] = true;
 			}
 
 			if (is_time_painting && state->timespan_select_mode == SELECT_FINE) {
-				if (reset_selected_timespan) {
+				if (reset_selection) {
 					state->selected_timespan.start = mu;
 					state->selected_timespan.end = mu;
 				} else {
@@ -1424,7 +1429,7 @@ static void g_header(void)
 					(state->timespan_select_mode == SELECT_TICK)
 					);
 				if (is_spanpos && last_spanbx <= mx && mx < bx) {
-					if (reset_selected_timespan) {
+					if (reset_selection) {
 						state->selected_timespan.start = last_spanpos;
 						state->selected_timespan.end = pos;
 					} else {
