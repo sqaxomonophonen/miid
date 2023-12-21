@@ -982,6 +982,15 @@ static void ToggleButton(const char* label, bool* p, ImVec4 color)
 	ImGui::PopStyleColor(3);
 }
 
+static void MaybeSetItemTooltip(const char* fmt, ...)
+{
+	if (!CBOOL(show_tooltips)) return;
+	va_list args;
+	va_start(args, fmt);
+	ImGui::SetItemTooltipV(fmt, args);
+	va_end(args);
+}
+
 static inline float mouse_wheel_scalar(float wheel)
 {
 	return powf(lerp(1.001f, 1.4f, CFLOAT(wheel_sensitivity)), wheel);
@@ -1116,7 +1125,7 @@ static void g_header(void)
 					if (ImGui::Button("Loop")) {
 					}
 					ToggleButton("T", &state->header.show_tracks, CCOL(tracks_toggle_color));
-					ImGui::SetItemTooltip("Toggle track rows visibility");
+					MaybeSetItemTooltip("Toggle track rows visibility");
 
 					ImGui::SameLine();
 
@@ -1138,7 +1147,7 @@ static void g_header(void)
 						}
 						break;
 					}
-					ImGui::SetItemTooltip("Timespan selection mode");
+					MaybeSetItemTooltip("Timespan selection mode");
 
 					ImGui::SameLine();
 					if (ImGui::Button("Op")) do_open_op_popup = true;
@@ -1160,7 +1169,7 @@ static void g_header(void)
 							do_popup_editing_track_index = track_index;
 						}
 					}
-					ImGui::SetItemTooltip("Left-click: toggle. Right-click: edit");
+					MaybeSetItemTooltip("Left-click: toggle. Right-click: edit");
 				}
 			}
 

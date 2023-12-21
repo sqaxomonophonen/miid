@@ -8,6 +8,7 @@
 
 enum : int {
 	T_NONE,
+	T_BOOL,
 	T_PX,
 	T_SLIDE,
 	T_COLOR,
@@ -20,6 +21,7 @@ enum : int {
 struct cval {
 	int t;
 	union {
+		bool b;
 		float f32;
 		ImVec4 v4;
 		ImGuiKey key;
@@ -39,6 +41,7 @@ struct cval {
 	(float)((x)&0xff)       * (1.0f / 255.0f))
 
 
+#define BOOL(x)     ((struct cval){ .t = T_BOOL        , .b = (x)          })
 #define PX(x)       ((struct cval){ .t = T_PX          , .f32 = (x)        })
 #define SLIDE(x)    ((struct cval){ .t = T_SLIDE       , .f32 = (x)        })
 #define ADD_RGB(x)  ((struct cval){ .t = T_COLOR_ADD   , .v4  = RGB2V4(x)  })
@@ -63,6 +66,16 @@ struct cval* get_cval(enum config_id id)
 {
 	assert(0 <= id && id < CONFIG_END);
 	return &cvals[id];
+}
+
+bool config_get_bool(enum config_id id)
+{
+	struct cval* v = get_cval(id);
+	switch (v->t) {
+	case T_BOOL:
+		return v->b;
+	default: assert(!"not bool type");
+	}
 }
 
 float config_get_float(enum config_id id)

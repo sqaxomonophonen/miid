@@ -4,6 +4,7 @@
 
 //  key                                   type/default
 #define EMIT_CONFIGS                                                      \
+C(  show_tooltips                       , BOOL(true)                    ) \
 C(  gui_size                            , PX(20)                        ) \
 C(  wheel_sensitivity                   , SLIDE(0.2)                    ) \
 C(  time_fit_padding                    , SLIDE(0.6)                    ) \
@@ -50,11 +51,13 @@ enum config_id {
 	#undef C
 };
 
+bool   config_get_bool(enum config_id);
 float  config_get_float(enum config_id);
 ImVec4 config_get_color(enum config_id);
 ImVec4 config_color_transform(ImVec4 x, enum config_id);
 ImGuiKey config_get_key(enum config_id);
 
+#define CBOOL(NAME)           config_get_bool(CN(NAME))
 #define CFLOAT(NAME)          config_get_float(CN(NAME))
 #define CCOL(NAME)            config_get_color(CN(NAME))
 #define CCOLTX(VALUE,NAME)    config_color_transform(VALUE,CN(NAME))
