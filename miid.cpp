@@ -1058,7 +1058,7 @@ static inline bool note_render_next(struct note_render* r)
 
 static void g_header(void)
 {
-	const int IDLE=0, TIMESPAN_PAINT=1, TIME_PAN=2;
+	const int IDLE=0, TIME_PAINT=1, TIMETRACK_PAINT=2, TIME_PAN=3;
 	struct state* state = curstate();
 
 	float layout_y0s[1<<8];
@@ -1082,8 +1082,6 @@ static void g_header(void)
 		struct mid* mid = state->myd;
 		const int n_tracks = mid_get_track_count(mid);
 		const int n_rows = 1 + (state->header.show_tracks ? n_tracks : 0);
-
-		bool try_track_select = false;
 
 		for (int row_index = 0; row_index < n_rows; row_index++) {
 			const float row_height = row_index == 0 ? getsz(1.5) : getsz(1.0);
@@ -1301,11 +1299,11 @@ static void g_header(void)
 				state->header.drag_state = IDLE;
 			} else if (click_lmb) {
 				const float my = io.MousePos.y;
+				reset_selected_timespan = !io.KeyShift;
 				if (layout_y0s[0] <= my && my < layout_y0s[1]) {
-					state->header.drag_state = TIMESPAN_PAINT;
-					reset_selected_timespan = true;
+					state->header.drag_state = TIME_PAINT;
 				} else {
-					try_track_select = true;
+					state->header.drag_state = TIMETRACK_PAINT;
 				}
 			} else if (click_rmb) {
 				state->header.drag_state = TIME_PAN;
@@ -1334,21 +1332,13 @@ static void g_header(void)
 
 		for (int i = 1; i < n_rows; i++) {
 			const float x0 = table_p0.x;
-			const float x1 = layout_x1;
-			const float x2 = x0 + table_width;
+			const float x1 = x0 + table_width;
 			const float y0 = layout_y0s[i];
 			const float y1 = layout_y0s[i+1];
 			const ImVec2 p0 = ImVec2(x0, y0);
 			const ImVec2 p1 = ImVec2(x1, y1);
-			const ImVec2 p2 = ImVec2(x2, y1);
-			// HACK: checking mouse cursor shape to prevent
-			// selecting track when resizing column width
-			if (ImGui::IsMouseHoveringRect(p0, p2) && ImGui::GetMouseCursor() == ImGuiMouseCursor_Arrow) {
+			if (ImGui::IsMouseHoveringRect(p0, p1) && ImGui::GetMouseCursor() == ImGuiMouseCursor_Arrow) {
 				new_hover_row_index = i;
-				const int track_index = i-1;
-				if (try_track_select) {
-					track_toggle(track_index);
-				}
 				break;
 			}
 		}
@@ -1371,7 +1361,16 @@ static void g_header(void)
 			int last_spanpos = 0;
 			float last_spanbx = bx;
 
-			if (state->header.drag_state == TIMESPAN_PAINT && state->timespan_select_mode == SELECT_FINE) {
+			const bool is_track_painting = state->header.drag_state == TIMETRACK_PAINT;
+			const bool is_time_painting = (state->header.drag_state == TIME_PAINT) || (state->header.drag_state == TIMETRACK_PAINT);
+
+			if (is_track_painting && new_hover_row_index >= 1) {
+				const int track_index = new_hover_row_index - 1;
+				state->primary_track_select = track_index;
+				state->track_select_set[track_index] = true;
+			}
+
+			if (is_time_painting && state->timespan_select_mode == SELECT_FINE) {
 				if (reset_selected_timespan) {
 					state->selected_timespan.start = mu;
 					state->selected_timespan.end = mu;
@@ -1419,7 +1418,7 @@ static void g_header(void)
 			int pos = 0;
 			while (pos <= mid->end_of_song_pos) {
 				const bool is_spanpos =
-					(state->header.drag_state == TIMESPAN_PAINT) &&
+					is_time_painting &&
 					(
 					((state->timespan_select_mode == SELECT_BAR) && tickpos == 0) ||
 					(state->timespan_select_mode == SELECT_TICK)
@@ -1428,7 +1427,7 @@ static void g_header(void)
 					if (reset_selected_timespan) {
 						state->selected_timespan.start = last_spanpos;
 						state->selected_timespan.end = pos;
-					} else if (state->header.drag_state == TIMESPAN_PAINT) {
+					} else {
 						if (last_spanpos < state->selected_timespan.start) {
 							state->selected_timespan.start = last_spanpos;
 						}
