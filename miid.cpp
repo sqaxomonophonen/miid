@@ -175,6 +175,12 @@ enum {
 	MODE0_DO_CLOSE,  // window is closing
 };
 
+enum {
+	SHOW_ALL_TRACKS = 0,
+	SHOW_SELECTED_TRACKS,
+	SHOW_NO_TRACKS,
+};
+
 struct state {
 	int mode0;
 	char* path;
@@ -186,10 +192,11 @@ struct state {
 	bool bar_select;
 	int timespan_select_mode = SELECT_BAR;
 	bool track_select_set[1<<8];
+	bool track_show_set[1<<8];
 	int primary_track_select = -1;
 
 	struct {
-		bool show_tracks = true;
+		int track_show_mode = SHOW_ALL_TRACKS;
 		int hover_row_index = -1;
 		int drag_state;
 		float pan_last_x;
@@ -968,20 +975,6 @@ static void track_toggle(int index)
 	}
 }
 
-static void ToggleButton(const char* label, bool* p, ImVec4 color)
-{
-	ImVec4 x = color;
-	if (!*p) x = CCOLTX(x, toggle_button_off_coltx);
-	ImGui::PushStyleColor(ImGuiCol_Button, x);
-	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, CCOLTX(x, toggle_button_hover_coltx));
-	ImGui::PushStyleColor(ImGuiCol_ButtonActive,  CCOLTX(x, toggle_button_active_coltx));
-
-	if (ImGui::Button(label)) {
-		*p = !*p;
-	}
-	ImGui::PopStyleColor(3);
-}
-
 static void MaybeSetItemTooltip(const char* fmt, ...)
 {
 	if (!CBOOL(show_tooltips)) return;
@@ -1064,6 +1057,36 @@ static inline bool note_render_next(struct note_render* r)
 	return false;
 }
 
+static int map_row_to_track_index(int row_index)
+{
+	if (row_index <= 0) return -1;
+	struct state* state = curstate();
+	struct mid* mid = state->myd;
+	const int n_tracks = mid_get_track_count(mid);
+	if (state->header.track_show_mode == SHOW_ALL_TRACKS) {
+		return row_index - 1;
+	} else if (state->header.track_show_mode == SHOW_SELECTED_TRACKS) {
+		int cmp = 0;
+		for (int i = 0; i < n_tracks; i++) {
+			if (state->track_show_set[i]) {
+				if (cmp == (row_index-1)) {
+					return i;
+				}
+				cmp++;
+			}
+		}
+		return -1;
+	} else {
+		return -1;
+	}
+}
+
+static int must_map_row_to_track_index(int row_index)
+{
+	int i = map_row_to_track_index(row_index);
+	assert(i >= 0);
+	return i;
+}
 
 static void g_header(void)
 {
@@ -1084,13 +1107,28 @@ static void g_header(void)
 	const float table_width = ImGui::GetContentRegionAvail().x;
 	const int n_columns = 2;
 	const ImGuiTableFlags table_flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersV;
+	int set_new_track_show_mode = -1;
 	if (ImGui::BeginTable("header", n_columns, table_flags)) {
 		ImGui::TableSetupColumn("ctrl",     ImGuiTableColumnFlags_WidthFixed);
 		ImGui::TableSetupColumn("timeline", ImGuiTableColumnFlags_WidthStretch);
 
 		struct mid* mid = state->myd;
 		const int n_tracks = mid_get_track_count(mid);
-		const int n_rows = 1 + (state->header.show_tracks ? n_tracks : 0);
+
+		int n_selected_tracks = 0;
+		int n_show_selected_tracks = 0;
+		for (int i = 0; i < n_tracks; i++) {
+			if (state->track_select_set[i]) n_selected_tracks++;
+			if (state->track_show_set[i]) n_show_selected_tracks++;
+		}
+
+		const int n_rows = 1 +
+			(
+			state->header.track_show_mode == SHOW_ALL_TRACKS       ? n_tracks :
+			state->header.track_show_mode == SHOW_SELECTED_TRACKS  ? n_show_selected_tracks :
+			state->header.track_show_mode == SHOW_NO_TRACKS        ? 0 :
+			-1);
+		assert(n_rows > 0);
 
 		for (int row_index = 0; row_index < n_rows; row_index++) {
 			const float row_height = row_index == 0 ? getsz(1.5) : getsz(1.0);
@@ -1102,12 +1140,14 @@ static void g_header(void)
 			assert(row_index < ARRAY_LENGTH(layout_y0s));
 			layout_y0s[row_index] = ImGui::GetCursorScreenPos().y;
 
+			int track_index = -1;
+
 			if (row_index > 0) {
 				ImVec4 c = (row_index & 1) == 1 ? CCOL(track_row_even_color) : CCOL(track_row_odd_color);
 				if (row_index == state->header.hover_row_index) {
 					c = CCOLTX(c, track_row_hover_coltx);
 				}
-				const int track_index = row_index - 1;
+				track_index = must_map_row_to_track_index(row_index);
 				if (track_index == state->primary_track_select) {
 					c = CCOLTX(c, primary_track_coltx);
 				} else if (state->track_select_set[track_index]) {
@@ -1115,6 +1155,8 @@ static void g_header(void)
 				}
 				ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::GetColorU32(c));
 			}
+
+			if (row_index > 0) assert(track_index >= 0);
 
 			ImGui::TableSetColumnIndex(0);
 			{
@@ -1124,7 +1166,33 @@ static void g_header(void)
 					ImGui::SameLine();
 					if (ImGui::Button("Loop")) {
 					}
-					ToggleButton("T", &state->header.show_tracks, CCOL(tracks_toggle_color));
+
+					if (state->header.track_show_mode == SHOW_ALL_TRACKS) {
+						if (ImGui::Button("A")) {
+							if (n_selected_tracks > 0) {
+								for (int i = 0; i < n_tracks; i++) {
+									state->track_show_set[i] = state->track_select_set[i];
+								}
+								set_new_track_show_mode = SHOW_SELECTED_TRACKS;
+							} else {
+								set_new_track_show_mode = SHOW_NO_TRACKS;
+							}
+						}
+						MaybeSetItemTooltip("Showing all tracks");
+					} else if (state->header.track_show_mode == SHOW_SELECTED_TRACKS) {
+						if (ImGui::Button("S")) {
+							set_new_track_show_mode = SHOW_NO_TRACKS;
+						}
+						MaybeSetItemTooltip("Showing selected tracks");
+					} else if (state->header.track_show_mode == SHOW_NO_TRACKS) {
+						if (ImGui::Button("N")) {
+							set_new_track_show_mode = SHOW_ALL_TRACKS;
+						}
+						MaybeSetItemTooltip("Showing no tracks");
+					} else {
+						assert(!"UNREACHABLE");
+					}
+
 					MaybeSetItemTooltip("Toggle track rows visibility");
 
 					ImGui::SameLine();
@@ -1151,10 +1219,11 @@ static void g_header(void)
 
 					ImGui::SameLine();
 					if (ImGui::Button("Op")) do_open_op_popup = true;
+					MaybeSetItemTooltip("Range edits");
 					ImGui::SameLine();
 					if (ImGui::Button("Song")) do_open_song_popup = true;
+					MaybeSetItemTooltip("Edit song");
 				} else {
-					const int track_index = row_index - 1;
 					struct trk* trk = mid_get_trk(mid, track_index);
 					char label[1<<9];
 					snprintf(label, sizeof label, "%s (ch%d)##%d",
@@ -1198,6 +1267,7 @@ static void g_header(void)
 		if (ImGui::BeginPopup("op_popup")) {
 			ImGui::SeparatorText("Operations");
 			ImGui::TextUnformatted("TODO: set tempo"); // TODO
+			ImGui::TextUnformatted("TODO: time crop (set start/end/both)"); // TODO
 			ImGui::TextUnformatted("TODO: set time signature"); // TODO
 			ImGui::TextUnformatted("TODO: delete range"); // TODO
 			ImGui::TextUnformatted("TODO: duplicate range"); // TODO
@@ -1379,9 +1449,11 @@ static void g_header(void)
 						state->track_select_set[i] = false;
 					}
 				}
-				const int track_index = new_hover_row_index - 1;
-				state->primary_track_select = track_index;
-				state->track_select_set[track_index] = true;
+				const int track_index = map_row_to_track_index(new_hover_row_index);
+				if (track_index >= 0) {
+					state->primary_track_select = track_index;
+					state->track_select_set[track_index] = true;
+				}
 			}
 
 			if (is_time_painting && state->timespan_select_mode == SELECT_FINE) {
@@ -1557,7 +1629,7 @@ static void g_header(void)
 			for (int i0 = 1; i0 < n_rows; i0++) {
 				const float y0 = layout_y0s[i0];
 				const float y1 = layout_y0s[i0+1];
-				struct trk* trk = mid_get_trk(mid, i0-1);
+				struct trk* trk = mid_get_trk(mid, must_map_row_to_track_index(i0));
 				const bool percussive = trk->percussive;
 				note_render_do_mevs(&nr, trk->mev_arr, arrlen(trk->mev_arr), percussive);
 				while (note_render_next(&nr)) {
@@ -1584,6 +1656,11 @@ static void g_header(void)
 	}
 
 	state->header.hover_row_index = new_hover_row_index;
+
+	if (set_new_track_show_mode >= 0) {
+		state->header.track_show_mode = set_new_track_show_mode;
+	}
+
 }
 
 static void g_pianoroll(void)
