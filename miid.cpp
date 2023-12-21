@@ -1152,7 +1152,7 @@ static void g_header(void)
 						trk->name,
 						trk->midi_channel+1,
 						track_index);
-					const ImVec2 sz = ImVec2(ImGui::GetColumnWidth(), getsz(1)+4);
+					const ImVec2 sz = ImVec2(ImGui::GetColumnWidth(), 0);
 					if (ImGui::ButtonEx(label, sz, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight)) {
 						if (ImGui::IsMouseReleased(0)) {
 							track_toggle(track_index);
