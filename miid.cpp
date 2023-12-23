@@ -181,6 +181,8 @@ enum {
 	SHOW_NO_TRACKS,
 };
 
+#define MAX_TRACKS (1<<8)
+
 struct state {
 	int mode0;
 	char* path;
@@ -191,8 +193,8 @@ struct state {
 	float beat_dx;
 	bool bar_select;
 	int timespan_select_mode = SELECT_BAR;
-	bool track_select_set[1<<8];
-	bool track_show_set[1<<8];
+	bool track_select_set[MAX_TRACKS];
+	bool track_show_set[MAX_TRACKS];
 	int primary_track_select = -1;
 
 	struct {
@@ -1093,7 +1095,7 @@ static void g_header(void)
 	const int IDLE=0, TIME_PAINT=1, TIMETRACK_PAINT=2, TIME_PAN=3;
 	struct state* state = curstate();
 
-	float layout_y0s[1<<8];
+	float layout_y0s[MAX_TRACKS+2];
 	float layout_x1 = 0;
 	float layout_w1 = 0;
 
@@ -1113,22 +1115,41 @@ static void g_header(void)
 		ImGui::TableSetupColumn("timeline", ImGuiTableColumnFlags_WidthStretch);
 
 		struct mid* mid = state->myd;
-		const int n_tracks = mid_get_track_count(mid);
 
-		int n_selected_tracks = 0;
-		int n_show_selected_tracks = 0;
-		for (int i = 0; i < n_tracks; i++) {
-			if (state->track_select_set[i]) n_selected_tracks++;
-			if (state->track_show_set[i]) n_show_selected_tracks++;
+		int n_displayed_tracks;
+		int track_display_list[MAX_TRACKS];
+
+		const int n_total_tracks = mid_get_track_count(mid);
+		assert(n_total_tracks <= MAX_TRACKS);
+
+		switch (state->header.track_show_mode) {
+		case SHOW_ALL_TRACKS: {
+			n_displayed_tracks = n_total_tracks;
+			for (int i = 0; i < n_total_tracks; i++) {
+				track_display_list[i] = i;
+			}
+		} break;
+		case SHOW_SELECTED_TRACKS: {
+			n_displayed_tracks = 0;
+			for (int i = 0; i < n_total_tracks; i++) {
+				if (state->track_show_set[i]) {
+					track_display_list[n_displayed_tracks++] = i;
+				}
+			}
+		} break;
+		case SHOW_NO_TRACKS: {
+			n_displayed_tracks = 0;
+		} break;
+		default: assert(!"unhandled case");
 		}
 
-		const int n_rows = 1 +
-			(
-			state->header.track_show_mode == SHOW_ALL_TRACKS       ? n_tracks :
-			state->header.track_show_mode == SHOW_SELECTED_TRACKS  ? n_show_selected_tracks :
-			state->header.track_show_mode == SHOW_NO_TRACKS        ? 0 :
-			-1);
+		const int n_rows = 1 + n_displayed_tracks;
 		assert(n_rows > 0);
+
+		int n_selected_tracks = 0;
+		for (int i = 0; i < n_total_tracks; i++) {
+			if (state->track_select_set[i]) n_selected_tracks++;
+		}
 
 		for (int row_index = 0; row_index < n_rows; row_index++) {
 			const float row_height = row_index == 0 ? getsz(1.5) : getsz(1.0);
@@ -1172,7 +1193,7 @@ static void g_header(void)
 						if (state->header.track_show_mode == SHOW_ALL_TRACKS) {
 							if (ImGui::Button("A")) {
 								if (n_selected_tracks > 0) {
-									for (int i = 0; i < n_tracks; i++) {
+									for (int i = 0; i < n_total_tracks; i++) {
 										state->track_show_set[i] = state->track_select_set[i];
 									}
 									set_new_track_show_mode = SHOW_SELECTED_TRACKS;
@@ -1300,7 +1321,8 @@ static void g_header(void)
 			ImGui::OpenPopup("track_edit_popup");
 		}
 		if (ImGui::BeginPopup("track_edit_popup")) {
-			struct trk* trk = mid_get_trk(mid, state->header.popup_editing_track_index);
+			const int editing_track_index = state->header.popup_editing_track_index;
+			struct trk* trk = mid_get_trk(mid, editing_track_index);
 			ImGui::SeparatorText("Track Edit");
 
 			ImGui::InputText("Name", trk->name, TEXT_FIELD_SIZE);
@@ -1322,24 +1344,31 @@ static void g_header(void)
 				}
 			}
 
-			const bool can_move_up = state->header.popup_editing_track_index > 0;
-			const bool can_move_down = state->header.popup_editing_track_index < n_tracks-1;
+			int editing_track_row = -1;
+			for (int i = 0; i < n_displayed_tracks; i++) {
+				const int track_index = track_display_list[i];
+				if (track_index == editing_track_index) {
+					editing_track_row = i;
+				}
+			}
+
+			const bool can_move_up = editing_track_row > 0;
+			const bool can_move_down = editing_track_row < n_displayed_tracks-1;
 			ImGui::BeginDisabled(!can_move_up);
 			struct trk* _tracks = mid_get_trk(mid, 0);
-			if (ImGui::Button("Move Up")) {
-				struct trk tmp = _tracks[state->header.popup_editing_track_index-1];
-				_tracks[state->header.popup_editing_track_index-1] = _tracks[state->header.popup_editing_track_index];
-				_tracks[state->header.popup_editing_track_index] = tmp;
-				state->header.popup_editing_track_index--;
-			}
+			int move_delta = 0;
+			if (ImGui::Button("Move Up")) move_delta = -1;
 			ImGui::EndDisabled();
 			ImGui::SameLine();
 			ImGui::BeginDisabled(!can_move_down);
-			if (ImGui::Button("Down")) {
-				struct trk tmp = _tracks[state->header.popup_editing_track_index+1];
-				_tracks[state->header.popup_editing_track_index+1] = _tracks[state->header.popup_editing_track_index];
-				_tracks[state->header.popup_editing_track_index] = tmp;
-				state->header.popup_editing_track_index++;
+			if (ImGui::Button("Down")) move_delta = 1;
+			if (move_delta != 0) {
+				const int i0 = track_display_list[editing_track_row];
+				const int i1 = track_display_list[editing_track_row + move_delta];
+				struct trk tmp = _tracks[i1];
+				_tracks[i1] = _tracks[i0];
+				_tracks[i0] = tmp;
+				state->header.popup_editing_track_index = i1;
 			}
 			ImGui::EndDisabled();
 
@@ -1448,7 +1477,7 @@ static void g_header(void)
 
 			if (is_track_painting && new_hover_row_index >= 1) {
 				if (reset_selection) {
-					for (int i = 0; i < n_tracks; i++) {
+					for (int i = 0; i < n_total_tracks; i++) {
 						state->track_select_set[i] = false;
 					}
 				}
@@ -1663,7 +1692,6 @@ static void g_header(void)
 	if (set_new_track_show_mode >= 0) {
 		state->header.track_show_mode = set_new_track_show_mode;
 	}
-
 }
 
 static void g_pianoroll(void)
