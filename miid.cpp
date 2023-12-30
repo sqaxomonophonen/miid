@@ -2009,6 +2009,7 @@ static void g_pianoroll(void)
 			TOOL_NOTE,
 			TOOL_CURV,
 			TOOL_SEQ,
+			TOOL_VIEW,
 			TOOL_ART,
 		};
 		static int e2 = TOOL_NOTE;
@@ -2017,25 +2018,33 @@ static void g_pianoroll(void)
 		if (RadiaButton("Note", &e2, TOOL_NOTE)) {
 			brushen = false;
 		}
-		MaybeSetItemTooltip("Paint notes\nLeft-click to paint\nRight-click to erase\nWheel changes velocity\nPage up/down navigates brush history");
+		MaybeSetItemTooltip("Paint notes\nLeft-click to paint\nRight-click to erase (bbox)\nWheel changes velocity\nPage up/down navigates brush history");
 
 		ImGui::SameLine();
 		if (RadiaButton("Curv", &e2, TOOL_CURV)) {
 			brushen = false;
 		}
-		MaybeSetItemTooltip("Paint curves; pitchbend/CC.");
+		MaybeSetItemTooltip("Paint curves (pitchbend/CC)\nLeft-click to paint\nRight-click to zero\nWheel changes curve view height\nPage up/down navigates brush history");
 
 		ImGui::SameLine();
 		if (RadiaButton("Seq", &e2, TOOL_SEQ)) {
 			brushen = false;
 		}
-		MaybeSetItemTooltip("Sequencer: enter note sequences using keyboard.");
+		MaybeSetItemTooltip("Sequencer: enter note sequences using keyboard\nLeft-click to place cursor\nRight-click to erase(bbox)\nWheel changes velocity");
+
+		ImGui::SameLine();
+		if (RadiaButton("View", &e2, TOOL_VIEW)) {
+			brushen = false;
+		}
+		MaybeSetItemTooltip("Change view (/time-selction)\nLeft-click to center\nRight-click to pan\nWheel for zoom\n");
 
 		ImGui::SameLine();
 		if (RadiaButton("Art", &e2, TOOL_ART)) {
 			brushen = false;
 		}
-		MaybeSetItemTooltip("Artistic brushes. Tool with configurable area effects.");
+		MaybeSetItemTooltip("Artistic brushes; tool with configurable area effects\nLeft/right-click to use tool A/B\nWheel changes radius\nManage brushes with [Configure]");
+
+		bool do_open_art_configure_popup = false;
 
 		if (e2 == TOOL_NOTE || e2 == TOOL_CURV) {
 			ImGui::SameLine();
@@ -2062,12 +2071,23 @@ static void g_pianoroll(void)
 					}
 					ImGui::EndCombo();
 				}
+				MaybeSetItemTooltip("Select type of curve (Pitch Bend / Control Change)");
 			}
 		} else if (e2 == TOOL_ART) {
 			ImGui::SameLine();
 			if (ImGui::Button("Configure")) {
-				// TODO
+				do_open_art_configure_popup = true;
 			}
+		}
+
+		if (do_open_art_configure_popup) {
+			ImGui::OpenPopup("art_configure_popup");
+		}
+		if (ImGui::BeginPopup("art_configure_popup")) {
+			ImGui::TextUnformatted("TODO TODO TODO");
+			ImGui::TextUnformatted("TODO TODO TODO");
+			ImGui::TextUnformatted("TODO TODO TODO");
+			ImGui::EndPopup();
 		}
 	}
 }
