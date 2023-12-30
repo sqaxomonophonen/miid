@@ -254,7 +254,7 @@ void config_load(void)
 		return;
 	}
 
-	#define BOOL(X)     { int i = 0; read_int(in, &i); printf("i=%d\n",i); cv->b = (i>0); }
+	#define BOOL(X)     { int i = 0; read_int(in, &i); cv->b = (i>0); }
 	#define PX(X)       read_float(in, &cv->f32);
 	#define SLIDE(X)    read_float(in, &cv->f32);
 	#define KEY(X)      // XXX TODO
