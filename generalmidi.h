@@ -34,6 +34,7 @@ enum cc_type {
 	PAN                    = 10,
 	DAMPER_PEDAL           = 64,
 	EFFECT1_DEPTH          = 91,
+	EFFECT3_DEPTH          = 93,
 	RESET_ALL_CONTROLLERS  = 121,
 };
 

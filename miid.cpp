@@ -624,6 +624,7 @@ static struct mid* mid_unmarshal_blob(struct blob blob)
 						case MODULATION_WHEEL:
 						case DAMPER_PEDAL:
 						case EFFECT1_DEPTH:
+						case EFFECT3_DEPTH:
 						case RESET_ALL_CONTROLLERS:
 							// handled (?)
 							break;
@@ -975,6 +976,60 @@ static void track_toggle(int index)
 		state->primary_track_select = index;
 		state->track_select_set[index] = true;
 	}
+}
+
+#if 0
+// radio button that looks like a normal button. which is why it's a bad idea?
+static bool Radio2Button(const char* label, int* value, int button_value)
+{
+	ImVec4 x = CCOL(toggle_button_color);
+	if (*value == button_value) {
+		ImGui::PushStyleColor(ImGuiCol_Button,        x);
+		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, x);
+		ImGui::PushStyleColor(ImGuiCol_ButtonActive,  x);
+	} else {
+		x = CCOLTX(x, toggle_button_off_coltx);
+		ImGui::PushStyleColor(ImGuiCol_Button, x);
+		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, CCOLTX(x, toggle_button_hover_coltx));
+		ImGui::PushStyleColor(ImGuiCol_ButtonActive,  CCOLTX(x, toggle_button_active_coltx));
+	}
+	bool r = false;
+	if (ImGui::Button(label)) {
+		if (*value != button_value) {
+			*value = button_value;
+			r = true;
+		}
+	}
+	ImGui::PopStyleColor(3);
+	return r;
+}
+#endif
+
+static bool RadiaButton(const char* label, int* value, int button_value)
+{
+	const int prev_value = *value;
+	if (*value == button_value) {
+		ImGui::PushStyleColor(ImGuiCol_Text, CCOL(label_active_color));
+	} else {
+		ImGui::PushStyleColor(ImGuiCol_Text, CCOL(label_inactive_color));
+	}
+	ImGui::RadioButton(label, value, button_value);
+	ImGui::PopStyleColor(1);
+	return *value != prev_value;
+}
+
+static bool Blinkbox(const char* label, bool* p)
+{
+	if (*p) {
+		const double duration = 0.33;
+		const bool blink0 = fmod(ImGui::GetTime(), duration) < (duration*0.5);
+		ImGui::PushStyleColor(ImGuiCol_Text, blink0 ? CCOL(blinkbox_active0_color) : CCOL(blinkbox_active1_color));
+	} else {
+		ImGui::PushStyleColor(ImGuiCol_Text, CCOL(blinkbox_inactive_color));
+	}
+	const bool click = ImGui::Checkbox(label, p);
+	ImGui::PopStyleColor(1);
+	return click && *p;
 }
 
 static void MaybeSetItemTooltip(const char* fmt, ...)
@@ -1948,14 +2003,72 @@ static void g_pianoroll(void)
 		ImGui::PopFont();
 	}
 
-	// toolbar
-	if (ImGui::Button("Tool0")) {
-	}
-	ImGui::SameLine();
-	if (ImGui::Button("Tool1")) {
-	}
-	ImGui::SameLine();
-	if (ImGui::Button("Tool2")) {
+	// bottom toolbar
+	{
+		enum {
+			TOOL_NOTE,
+			TOOL_CURV,
+			TOOL_SEQ,
+			TOOL_ART,
+		};
+		static int e2 = TOOL_NOTE;
+		static bool brushen = false;
+
+		if (RadiaButton("Note", &e2, TOOL_NOTE)) {
+			brushen = false;
+		}
+		MaybeSetItemTooltip("Paint notes\nLeft-click to paint\nRight-click to erase\nWheel changes velocity\nPage up/down navigates brush history");
+
+		ImGui::SameLine();
+		if (RadiaButton("Curv", &e2, TOOL_CURV)) {
+			brushen = false;
+		}
+		MaybeSetItemTooltip("Paint curves; pitchbend/CC.");
+
+		ImGui::SameLine();
+		if (RadiaButton("Seq", &e2, TOOL_SEQ)) {
+			brushen = false;
+		}
+		MaybeSetItemTooltip("Sequencer: enter note sequences using keyboard.");
+
+		ImGui::SameLine();
+		if (RadiaButton("Art", &e2, TOOL_ART)) {
+			brushen = false;
+		}
+		MaybeSetItemTooltip("Artistic brushes. Tool with configurable area effects.");
+
+		if (e2 == TOOL_NOTE || e2 == TOOL_CURV) {
+			ImGui::SameLine();
+			Blinkbox("BrushDef", &brushen);
+			MaybeSetItemTooltip("Define a brush for the current tool.");
+
+			static int curve_type_index = 0;
+			const char* curve_types[] = {
+				"Pitch Bend",
+				"(CC1) Modulation Wheel",
+				"(CC7) Volume",
+				"(CC10) Pan",
+				"(CC64) Damper Pedal",
+				"(CC91/FX1) Reverb",
+				"(CC93/FX3) Chorus",
+			};
+			if (e2 == TOOL_CURV) {
+				ImGui::SameLine();
+				if (ImGui::BeginCombo("##curvetypecombo", curve_types[curve_type_index], ImGuiComboFlags_WidthFitPreview)) {
+					for (int i = 0; i < ARRAY_LENGTH(curve_types); i++) {
+						if (ImGui::Selectable(curve_types[i], i == curve_type_index)) {
+							curve_type_index = i;
+						}
+					}
+					ImGui::EndCombo();
+				}
+			}
+		} else if (e2 == TOOL_ART) {
+			ImGui::SameLine();
+			if (ImGui::Button("Configure")) {
+				// TODO
+			}
+		}
 	}
 }
 
