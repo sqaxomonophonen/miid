@@ -2227,17 +2227,22 @@ static void g_pianoroll(void)
 			Blinkbox("BrushDef", &brushen);
 			MaybeSetItemTooltip("Define a brush for the current tool.");
 
-			static int curve_type_index = 0;
-			const char* curve_types[] = {
-				"Pitch Bend",
-				"(CC1) Modulation Wheel",
-				"(CC7) Volume",
-				"(CC10) Pan",
-				"(CC64) Damper Pedal",
-				"(CC91/FX1) Reverb",
-				"(CC93/FX3) Chorus",
-			};
-			if (e2 == TOOL_CURV) {
+			if (e2 == TOOL_NOTE) {
+				static int velocity = 127;
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(getsz(10));
+				ImGui::SliderInt("##velocity", &velocity, 1, 127, "velocity=%d", ImGuiSliderFlags_AlwaysClamp);
+			} else if (e2 == TOOL_CURV) {
+				static int curve_type_index = 0;
+				const char* curve_types[] = {
+					"Pitch Bend",
+					"(CC1) Modulation Wheel",
+					"(CC7) Volume",
+					"(CC10) Pan",
+					"(CC64) Damper Pedal",
+					"(CC91/FX1) Reverb",
+					"(CC93/FX3) Chorus",
+				};
 				ImGui::SameLine();
 				if (ImGui::BeginCombo("##curvetypecombo", curve_types[curve_type_index], ImGuiComboFlags_WidthFitPreview)) {
 					for (int i = 0; i < ARRAY_LENGTH(curve_types); i++) {
@@ -2254,6 +2259,11 @@ static void g_pianoroll(void)
 			if (ImGui::Button("Configure")) {
 				do_open_art_configure_popup = true;
 			}
+		} else if (e2 == TOOL_SEQ) {
+			static int velocity = 127;
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(getsz(10));
+			ImGui::SliderInt("##velocity2", &velocity, 1, 127, "velocity=%d", ImGuiSliderFlags_AlwaysClamp);
 		}
 
 		if (do_open_art_configure_popup) {
