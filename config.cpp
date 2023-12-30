@@ -107,7 +107,7 @@ ImVec4 config_color_transform(ImVec4 x, enum config_id id)
 	}
 }
 
-ImGuiKey config_get_key(enum config_id id)
+ImGuiKeyChord config_get_key(enum config_id id)
 {
 	struct cval* v = config_get_cval(id);
 	switch (v->t) {
@@ -257,7 +257,7 @@ void config_load(void)
 	#define BOOL(X)     { int i = 0; read_int(in, &i); cv->b = (i>0); }
 	#define PX(X)       read_float(in, &cv->f32);
 	#define SLIDE(X)    read_float(in, &cv->f32);
-	#define KEY(X)      // XXX TODO
+	#define KEY(X)      { int i = 0; read_int(in, &i); cv->key = (ImGuiKeyChord)i; }
 	#define RGB(X)      read_col(in, &cv->v4);
 	#define RGBA(X)     read_col(in, &cv->v4);
 	#define ADD_RGB(X)  read_coltx(in, cv);
@@ -312,6 +312,11 @@ static void write_f32(FILE* out, float f)
 	fprintf(out, "%f", f);
 }
 
+static void write_int(FILE* out, int i)
+{
+	fprintf(out, "%d", i);
+}
+
 static void write_col(FILE* out, ImVec4 v)
 {
 	fprintf(out, "%f %f %f %f", v.x, v.y, v.z, v.w);
@@ -334,10 +339,10 @@ void config_save(void)
 {
 	FILE* out = fopen(CONFIG_FILENAME, "w");
 
-	#define BOOL(X)     fprintf(out, "%d", cv.b ? 1 : 0);
+	#define BOOL(X)     write_int(out, cv.b ? 1 : 0);
 	#define PX(X)       write_f32(out, cv.f32);
 	#define SLIDE(X)    write_f32(out, cv.f32);
-	#define KEY(X)      fprintf(out, "TODO");
+	#define KEY(X)      write_int(out, (int)cv.key);
 	#define RGB(X)      write_col(out, cv.v4);
 	#define RGBA(X)     write_col(out, cv.v4);
 	#define ADD_RGB(X)  write_coltx(out, &cv);

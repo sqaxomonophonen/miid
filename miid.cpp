@@ -1181,6 +1181,62 @@ static void coltxpick(const char* label, ImVec4* c, int* t)
 	ImGui::PopID();
 }
 
+static void get_key_string(char* dst, ImGuiKeyChord k)
+{
+	enum ImGuiKey mod = (ImGuiKey)(k & ImGuiMod_Mask_);
+	char* p = dst;
+	#define HMOD(s,k) if (mod&k) p += sprintf(p, "%s[%s]", p>dst?"+":"", s);
+	HMOD("Ctrl",  ImGuiMod_Ctrl)
+	HMOD("Shift", ImGuiMod_Shift)
+	HMOD("Alt",   ImGuiMod_Alt)
+	HMOD("Super", ImGuiMod_Super)
+	#undef HMOD
+	sprintf(p, "%s[%s]", p>dst?"+":"", ImGui::GetKeyName((ImGuiKey)(k & ~ImGuiMod_Mask_)));
+}
+
+static void keypick(const char* label, ImGuiKeyChord* key)
+{
+	ImGui::PushID(label);
+	char key_string[1<<10];
+	struct state* st = curstate();
+	get_key_string(key_string, *key);
+	ImGui::Text("%s", key_string);
+	ImGui::SameLine();
+	const char* id = "keypick_popup";
+	if (ImGui::Button("Bind key")) {
+		ImGui::OpenPopup(id);
+	}
+	ImGui::SameLine();
+	ImGui::Text("%s", label);
+	if (ImGui::BeginPopup(id)) {
+		ImGui::Text("Press key...");
+		for (int i = ImGuiKey_NamedKey_BEGIN; i < ImGuiKey_ReservedForModCtrl; i++) {
+			switch (i) {
+			case ImGuiKey_LeftCtrl:
+			case ImGuiKey_LeftShift:
+			case ImGuiKey_LeftAlt:
+			case ImGuiKey_LeftSuper:
+			case ImGuiKey_RightCtrl:
+			case ImGuiKey_RightShift:
+			case ImGuiKey_RightAlt:
+			case ImGuiKey_RightSuper:
+				continue;
+			}
+			if (ImGui::IsKeyPressed((ImGuiKey)i)) {
+				*key = (ImGuiKeyChord)i;
+				ImGuiIO& io = ImGui::GetIO();
+				if (io.KeyCtrl)  *key |= ImGuiMod_Ctrl;
+				if (io.KeyShift) *key |= ImGuiMod_Shift;
+				if (io.KeyAlt)   *key |= ImGuiMod_Alt;
+				if (io.KeySuper) *key |= ImGuiMod_Super;
+				ImGui::CloseCurrentPopup();
+			}
+		}
+		ImGui::EndPopup();
+	}
+	ImGui::PopID();
+}
+
 static void pretty_label(char* dst, const char* input)
 {
 	// TODO: thinking that config names should have proper capitalization
@@ -1220,7 +1276,7 @@ static void g_prefs(void)
 	#define BOOL(X)     ImGui::Checkbox(label, &cval->b);
 	#define PX(X)       ImGui::SliderFloat(label, &cval->f32, 1.0f, 100.0f, "%.1f", 0);
 	#define SLIDE(X)    ImGui::SliderFloat(label, &cval->f32, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
-	#define KEY(X)      ImGui::Button(label); // TODO
+	#define KEY(X)      keypick(label, &cval->key);
 	#define RGB(X)      colpick(label, &cval->v4);
 	#define RGBA(X)     colpick(label, &cval->v4);
 	#define ADD_RGB(X)  coltxpick(label, &cval->v4, &cval->t);
@@ -2219,7 +2275,7 @@ static void g_edit(void)
 	assert((st->myd != NULL) && "must have myd at this point");
 
 	if (ImGui::IsWindowFocused()) {
-		if (ImGui::IsKeyPressed(CKEY(toggle_keyjazz_tester_key))) {
+		if (CKEYPRESS(toggle_keyjazz_tester_key)) {
 			st->keyjazz_tester_enabled = !st->keyjazz_tester_enabled;
 			if (!st->keyjazz_tester_enabled) {
 				printf("TODO kill notes\n"); // TODO

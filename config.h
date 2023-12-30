@@ -74,7 +74,7 @@ struct cval {
 		bool b;
 		float f32;
 		ImVec4 v4;
-		ImGuiKey key;
+		ImGuiKeyChord key;
 	};
 };
 
@@ -82,7 +82,7 @@ bool   config_get_bool(enum config_id);
 float  config_get_float(enum config_id);
 ImVec4 config_get_color(enum config_id);
 ImVec4 config_color_transform(ImVec4 x, enum config_id);
-ImGuiKey config_get_key(enum config_id);
+ImGuiKeyChord config_get_key(enum config_id);
 struct cval* config_get_cval(enum config_id);
 
 #define CBOOL(NAME)           config_get_bool(CN(NAME))
@@ -91,6 +91,7 @@ struct cval* config_get_cval(enum config_id);
 #define CCOLTX(VALUE,NAME)    config_color_transform(VALUE,CN(NAME))
 #define CCOL32(NAME)          ImGui::GetColorU32(CCOL(NAME))
 #define CKEY(NAME)            config_get_key(CN(NAME))
+#define CKEYPRESS(NAME)       ImGui::IsKeyChordPressed(CKEY(NAME))
 
 
 struct keyjazz_keymap {
