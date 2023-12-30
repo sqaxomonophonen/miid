@@ -56,11 +56,34 @@ enum config_id {
 	#undef C
 };
 
+enum : int {
+	T_NONE,
+	T_BOOL,
+	T_PX,
+	T_SLIDE,
+	T_COLOR,
+	T_COLOR_ADD,
+	T_COLOR_SUB,
+	T_COLOR_MUL,
+	T_KEY,
+};
+
+struct cval {
+	int t;
+	union {
+		bool b;
+		float f32;
+		ImVec4 v4;
+		ImGuiKey key;
+	};
+};
+
 bool   config_get_bool(enum config_id);
 float  config_get_float(enum config_id);
 ImVec4 config_get_color(enum config_id);
 ImVec4 config_color_transform(ImVec4 x, enum config_id);
 ImGuiKey config_get_key(enum config_id);
+struct cval* config_get_cval(enum config_id);
 
 #define CBOOL(NAME)           config_get_bool(CN(NAME))
 #define CFLOAT(NAME)          config_get_float(CN(NAME))
@@ -84,6 +107,11 @@ struct keyjazz_keymap {
 struct keyjazz_keymap* get_keyjazz_keymap(int index);
 
 void config_init(void);
+void config_get_clone(struct cval**);
+int config_compar(const struct cval*);
+void config_install(const struct cval*);
+void config_load(void);
+void config_save(void);
 
 // state defaults
 #define C_DEFAULT_BEAT_WIDTH_PX (24)

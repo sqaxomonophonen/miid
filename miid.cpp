@@ -214,8 +214,9 @@ struct state {
 	float key_dy = C_DEFAULT_KEY_HEIGHT_PX;
 
 	bool keyjazz_tester_enabled;
-};
 
+	struct cval* config_clone;
+};
 
 struct g {
 	bool using_audio;
@@ -1145,6 +1146,108 @@ static int must_map_row_to_track_index(int row_index)
 	return i;
 }
 
+static void colpick(const char* label, ImVec4* c)
+{
+	ImGui::ColorEdit4(label, (float*)c, ImGuiColorEditFlags_NoInputs);
+}
+
+static void coltxpick(const char* label, ImVec4* c, int* t)
+{
+	ImGui::PushID(label);
+	const char* types[] = { "Add", "Subtract", "Multiply" };
+	int i0;
+	switch (*t) {
+	case T_COLOR_ADD: i0 = 0; break;
+	case T_COLOR_SUB: i0 = 1; break;
+	case T_COLOR_MUL: i0 = 2; break;
+	default: assert(!"unexpected type");
+	}
+	if (ImGui::BeginCombo("##op", types[i0], ImGuiComboFlags_WidthFitPreview)) {
+		for (int i = 0; i < ARRAY_LENGTH(types); i++) {
+			if (ImGui::Selectable(types[i], i == i0)) {
+				i0 = i;
+			}
+		}
+		ImGui::EndCombo();
+	}
+	switch (i0) {
+	case 0: *t = T_COLOR_ADD; break;
+	case 1: *t = T_COLOR_SUB; break;
+	case 2: *t = T_COLOR_MUL; break;
+	default: assert(!"unexpected i0");
+	}
+	ImGui::SameLine();
+	ImGui::ColorEdit4(label, (float*)c, ImGuiColorEditFlags_NoInputs);
+	ImGui::PopID();
+}
+
+static void pretty_label(char* dst, const char* input)
+{
+	// TODO: thinking that config names should have proper capitalization
+	// if that is desired in display here? e.g. GUI_size instead of
+	// gui_size, or Show_Tooltips instead of show_tooltips?
+	const size_t n = strlen(input);
+	memcpy(dst, input, n);
+	for (int i = 0; i < n; i++) if (dst[i] == '_') dst[i] = ' ';
+	dst[n] = 0;
+}
+
+static void g_prefs(void)
+{
+	struct cval* cval = NULL;
+	char label[1<<10];
+
+	if (ImGui::Button("Load")) config_load();
+	ImGui::SetItemTooltip("Load config from disk"); // deliberately not using MaybeSetItemTooltip()
+	ImGui::SameLine();
+	if (ImGui::Button("Save")) config_save();
+	ImGui::SetItemTooltip("Save config to disk"); // deliberately not using MaybeSetItemTooltip()
+
+	ImGui::BeginDisabled(config_compar(curstate()->config_clone) == 0);
+	ImGui::SameLine();
+	if (ImGui::Button("Revert")) config_install(curstate()->config_clone);
+	ImGui::SetItemTooltip("Revert configs to before this popup was opened"); // deliberately not using MaybeSetItemTooltip()
+	ImGui::EndDisabled();
+
+	ImGui::SeparatorText("Preferences");
+
+	#define BOOL(X)     ImGui::Checkbox(label, &cval->b);
+	#define PX(X)       ImGui::SliderFloat(label, &cval->f32, 1.0f, 100.0f, "%.1f", 0);
+	#define SLIDE(X)    ImGui::SliderFloat(label, &cval->f32, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+	#define KEY(X)      ImGui::Button(label); // TODO
+	#define RGB(X)      colpick(label, &cval->v4);
+	#define RGBA(X)     colpick(label, &cval->v4);
+	#define ADD_RGB(X)  coltxpick(label, &cval->v4, &cval->t);
+	#define ADD_RGBA(X) coltxpick(label, &cval->v4, &cval->t);
+	#define SUB_RGB(X)  coltxpick(label, &cval->v4, &cval->t);
+	#define SUB_RGBA(X) coltxpick(label, &cval->v4, &cval->t);
+	#define MUL_RGB(X)  coltxpick(label, &cval->v4, &cval->t);
+	#define MUL_RGBA(X) coltxpick(label, &cval->v4, &cval->t);
+	#define NONE
+
+	#define C(NAME,TYPE) \
+	{ \
+		pretty_label(label, #NAME); \
+		cval = CN(NAME) >= CONFIG_END ? NULL : config_get_cval(CN(NAME)); \
+		TYPE \
+	}
+	EMIT_CONFIGS
+	#undef NONE
+	#undef C
+	#undef KEY
+	#undef RGB
+	#undef RGBA
+	#undef ADD_RGB
+	#undef ADD_RGBA
+	#undef SUB_RGB
+	#undef SUB_RGBA
+	#undef MUL_RGB
+	#undef MUL_RGBA
+	#undef SLIDE
+	#undef PX
+	#undef BOOL
+}
+
 static void g_header(void)
 {
 	const int IDLE=0, TIME_PAINT=1, TIMETRACK_PAINT=2, TIME_PAN=3;
@@ -1161,6 +1264,7 @@ static void g_header(void)
 	int do_popup_editing_track_index = -1;
 	bool do_open_op_popup = false;
 	bool do_open_song_popup = false;
+	bool do_open_prefs_popup = false;
 	const float table_width = ImGui::GetContentRegionAvail().x;
 	const int n_columns = 2;
 	const ImGuiTableFlags table_flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersV;
@@ -1299,9 +1403,14 @@ static void g_header(void)
 					ImGui::SameLine();
 					if (ImGui::Button("Op")) do_open_op_popup = true;
 					MaybeSetItemTooltip("Range edits");
+
 					ImGui::SameLine();
 					if (ImGui::Button("Song")) do_open_song_popup = true;
 					MaybeSetItemTooltip("Edit song");
+
+					ImGui::SameLine();
+					if (ImGui::Button("Prefs")) do_open_prefs_popup = true;
+					MaybeSetItemTooltip("Preferences and settings");
 				} else {
 					struct trk* trk = mid_get_trk(mid, track_index);
 					char label[1<<9];
@@ -1340,9 +1449,7 @@ static void g_header(void)
 		assert(n_rows < ARRAY_LENGTH(layout_y0s));
 		layout_y0s[n_rows] = ImGui::GetCursorScreenPos().y - 4;
 
-		if (do_open_op_popup) {
-			ImGui::OpenPopup("op_popup");
-		}
+		if (do_open_op_popup) ImGui::OpenPopup("op_popup");
 		if (ImGui::BeginPopup("op_popup")) {
 			ImGui::SeparatorText("Operations");
 			ImGui::TextUnformatted("TODO: set tempo"); // TODO
@@ -1355,9 +1462,7 @@ static void g_header(void)
 			ImGui::EndPopup();
 		}
 
-		if (do_open_song_popup) {
-			ImGui::OpenPopup("song_popup");
-		}
+		if (do_open_song_popup) ImGui::OpenPopup("song_popup");
 		if (ImGui::BeginPopup("song_popup")) {
 			ImGui::SeparatorText("Song");
 			ImGui::InputText("Title", mid->text, TEXT_FIELD_SIZE);
@@ -1368,6 +1473,15 @@ static void g_header(void)
 			if (ImGui::Button("Save")) {
 				// TODO
 			}
+			ImGui::EndPopup();
+		}
+
+		if (do_open_prefs_popup) {
+			config_get_clone(&state->config_clone);
+			ImGui::OpenPopup("prefs_popup");
+		}
+		if (ImGui::BeginPopup("prefs_popup")) {
+			g_prefs();
 			ImGui::EndPopup();
 		}
 
@@ -2280,6 +2394,7 @@ void miid_init(int argc, char** argv, float sample_rate)
 		}
 	}
 
+	config_load();
 }
 
 bool miid_frame(void* usr, bool request_close)

@@ -6,28 +6,6 @@
 #include "config.h"
 #include "util.h"
 
-enum : int {
-	T_NONE,
-	T_BOOL,
-	T_PX,
-	T_SLIDE,
-	T_COLOR,
-	T_COLOR_ADD,
-	T_COLOR_SUB,
-	T_COLOR_MUL,
-	T_KEY,
-};
-
-struct cval {
-	int t;
-	union {
-		bool b;
-		float f32;
-		ImVec4 v4;
-		ImGuiKey key;
-	};
-};
-
 #define RGB2V4(x) ImVec4( \
 	(float)(((x)>>16)&0xff) * (1.0f / 255.0f), \
 	(float)(((x)>>8)&0xff)  * (1.0f / 255.0f), \
@@ -61,8 +39,21 @@ static struct cval cvals[] = {
 	#undef C
 };
 
+#undef BOOL
+#undef PX
+#undef SLIDE
+#undef ADD_RGB
+#undef ADD_RGBA
+#undef SUB_RGB
+#undef SUB_RGBA
+#undef MUL_RGB
+#undef MUL_RGBA
+#undef RGB
+#undef RGBA
+#undef KEY
+#undef NONE
 
-struct cval* get_cval(enum config_id id)
+struct cval* config_get_cval(enum config_id id)
 {
 	assert(0 <= id && id < CONFIG_END);
 	return &cvals[id];
@@ -70,7 +61,7 @@ struct cval* get_cval(enum config_id id)
 
 bool config_get_bool(enum config_id id)
 {
-	struct cval* v = get_cval(id);
+	struct cval* v = config_get_cval(id);
 	switch (v->t) {
 	case T_BOOL:
 		return v->b;
@@ -80,7 +71,7 @@ bool config_get_bool(enum config_id id)
 
 float config_get_float(enum config_id id)
 {
-	struct cval* v = get_cval(id);
+	struct cval* v = config_get_cval(id);
 	switch (v->t) {
 	case T_PX:
 	case T_SLIDE:
@@ -91,7 +82,7 @@ float config_get_float(enum config_id id)
 
 ImVec4 config_get_color(enum config_id id)
 {
-	struct cval* v = get_cval(id);
+	struct cval* v = config_get_cval(id);
 	switch (v->t) {
 	case T_COLOR: return v->v4;
 	default: assert(!"not color type");
@@ -100,7 +91,7 @@ ImVec4 config_get_color(enum config_id id)
 
 ImVec4 config_color_transform(ImVec4 x, enum config_id id)
 {
-	struct cval* v = get_cval(id);
+	struct cval* v = config_get_cval(id);
 	ImVec4 y = v->v4;
 	switch (v->t) {
 	case T_COLOR_ADD: return imvec4_add(x,y);
@@ -112,7 +103,7 @@ ImVec4 config_color_transform(ImVec4 x, enum config_id id)
 
 ImGuiKey config_get_key(enum config_id id)
 {
-	struct cval* v = get_cval(id);
+	struct cval* v = config_get_cval(id);
 	switch (v->t) {
 	case T_KEY: return v->key;
 	default: assert(!"not key type");
@@ -185,4 +176,184 @@ int config_get_soundfont_count(void)
 char* config_get_soundfont_path(int index)
 {
 	return sf2_arr[index];
+}
+
+void config_get_clone(struct cval** x)
+{
+	const size_t sz = sizeof(cvals);
+	if (*x == NULL) *x = (struct cval*)malloc(sz);
+	memcpy(*x, cvals, sz);
+}
+
+int config_compar(const struct cval* other)
+{
+	return memcmp(cvals, other, sizeof(cvals));
+}
+
+void config_install(const struct cval* x)
+{
+	memcpy(cvals, x, sizeof(cvals));
+}
+
+static void read_int(FILE* in, int* i)
+{
+	fscanf(in, "%d", i);
+}
+
+static void read_float(FILE* in, float* f)
+{
+	fscanf(in, "%f", f);
+}
+
+static void read_col(FILE* in, ImVec4* c)
+{
+	fscanf(in, "%f %f %f %f", &c->x, &c->y, &c->z, &c->w);
+}
+
+static void read_coltx(FILE* in, struct cval* cv)
+{
+	ImVec4* c = &cv->v4;
+	char buf[1<<10];
+	fscanf(in, "%s %f %f %f %f", buf, &c->x, &c->y, &c->z, &c->w);
+	if (strcmp(buf, "add") == 0) {
+		cv->t = T_COLOR_ADD;
+	} else if (strcmp(buf, "sub") == 0) {
+		cv->t = T_COLOR_SUB;
+	} else if (strcmp(buf, "mul") == 0) {
+		cv->t = T_COLOR_MUL;
+	} else {
+		fprintf(stderr, "WARNING: bad coltx type \"%s\" in config\n", buf);
+	}
+}
+
+#define CONFIG_FILENAME "miid.conf"
+
+void config_load(void)
+{
+	FILE* in = fopen(CONFIG_FILENAME, "r");
+	if (in == NULL) {
+		fprintf(stderr, "skipping %s: no such file (config)\n", CONFIG_FILENAME);
+		return;
+	}
+
+	#define BOOL(X)     { int i = 0; read_int(in, &i); printf("i=%d\n",i); cv->b = (i>0); }
+	#define PX(X)       read_float(in, &cv->f32);
+	#define SLIDE(X)    read_float(in, &cv->f32);
+	#define KEY(X)      // XXX TODO
+	#define RGB(X)      read_col(in, &cv->v4);
+	#define RGBA(X)     read_col(in, &cv->v4);
+	#define ADD_RGB(X)  read_coltx(in, cv);
+	#define ADD_RGBA(X) read_coltx(in, cv);
+	#define SUB_RGB(X)  read_coltx(in, cv);
+	#define SUB_RGBA(X) read_coltx(in, cv);
+	#define MUL_RGB(X)  read_coltx(in, cv);
+	#define MUL_RGBA(X) read_coltx(in, cv);
+	#define NONE
+
+	#define C(NAME,TYPE) \
+		if (CN(NAME) < CONFIG_END) { \
+			if (strcmp(key, #NAME) == 0) { \
+				struct cval* cv = &cvals[CN(NAME)]; \
+				TYPE; \
+			} \
+		}
+
+	//int n = 0;
+	for (;;) {
+		char key[1<<10];
+		int e0 = fscanf(in, "%s", key);
+		if (e0 == -1) break;
+		EMIT_CONFIGS
+		if (fscanf(in, "\n") != 0) break;
+		//n++;
+	}
+	//printf("read %d configs\n", n);
+
+	#undef C
+
+	#undef NONE
+	#undef C
+	#undef KEY
+	#undef RGB
+	#undef RGBA
+	#undef ADD_RGB
+	#undef ADD_RGBA
+	#undef SUB_RGB
+	#undef SUB_RGBA
+	#undef MUL_RGB
+	#undef MUL_RGBA
+	#undef SLIDE
+	#undef PX
+	#undef BOOL
+
+	fclose(in);
+}
+
+static void write_f32(FILE* out, float f)
+{
+	fprintf(out, "%f", f);
+}
+
+static void write_col(FILE* out, ImVec4 v)
+{
+	fprintf(out, "%f %f %f %f", v.x, v.y, v.z, v.w);
+}
+
+static void write_coltx(FILE* out, struct cval* cv)
+{
+	const char* s;
+	switch (cv->t) {
+	case T_COLOR_ADD: s = "add"; break;
+	case T_COLOR_SUB: s = "sub"; break;
+	case T_COLOR_MUL: s = "mul"; break;
+	default: assert(!"unhandled type");
+	}
+	fprintf(out, "%s ", s);
+	write_col(out, cv->v4);
+}
+
+void config_save(void)
+{
+	FILE* out = fopen(CONFIG_FILENAME, "w");
+
+	#define BOOL(X)     fprintf(out, "%d", cv.b ? 1 : 0);
+	#define PX(X)       write_f32(out, cv.f32);
+	#define SLIDE(X)    write_f32(out, cv.f32);
+	#define KEY(X)      fprintf(out, "TODO");
+	#define RGB(X)      write_col(out, cv.v4);
+	#define RGBA(X)     write_col(out, cv.v4);
+	#define ADD_RGB(X)  write_coltx(out, &cv);
+	#define ADD_RGBA(X) write_coltx(out, &cv);
+	#define SUB_RGB(X)  write_coltx(out, &cv);
+	#define SUB_RGBA(X) write_coltx(out, &cv);
+	#define MUL_RGB(X)  write_coltx(out, &cv);
+	#define MUL_RGBA(X) write_coltx(out, &cv);
+	#define NONE
+
+	#define C(NAME,TYPE) \
+		if (CN(NAME) < CONFIG_END) { \
+			fprintf(out, "%s ", #NAME); \
+			struct cval cv = cvals[CN(NAME)]; \
+			TYPE; \
+			fprintf(out, "\n"); \
+		}
+	EMIT_CONFIGS
+	#undef C
+
+	#undef NONE
+	#undef C
+	#undef KEY
+	#undef RGB
+	#undef RGBA
+	#undef ADD_RGB
+	#undef ADD_RGBA
+	#undef SUB_RGB
+	#undef SUB_RGBA
+	#undef MUL_RGB
+	#undef MUL_RGBA
+	#undef SLIDE
+	#undef PX
+	#undef BOOL
+
+	fclose(out);
 }
