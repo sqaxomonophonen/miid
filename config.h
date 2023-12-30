@@ -107,8 +107,10 @@ struct keyjazz_keymap {
 struct keyjazz_keymap* get_keyjazz_keymap(int index);
 
 void config_init(void);
+void config_set_to_defaults(void);
 void config_get_clone(struct cval**);
 int config_compar(const struct cval*);
+bool config_is_defaults(void);
 void config_install(const struct cval*);
 void config_load(void);
 void config_save(void);

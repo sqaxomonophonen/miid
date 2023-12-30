@@ -39,6 +39,12 @@ static struct cval cvals[] = {
 	#undef C
 };
 
+static const struct cval DEFAULT_CVALS[] = {
+	#define C(NAME,CONSTRUCTOR) CONSTRUCTOR,
+	EMIT_CONFIGS
+	#undef C
+};
+
 #undef BOOL
 #undef PX
 #undef SLIDE
@@ -140,8 +146,20 @@ static void add_keyjazz_keymap(const char* s, int offset)
 
 char** sf2_arr;
 
+void config_install(const struct cval* x)
+{
+	memcpy(cvals, x, sizeof(cvals));
+}
+
+void config_set_to_defaults(void)
+{
+	config_install(DEFAULT_CVALS);
+}
+
 void config_init(void)
 {
+	config_set_to_defaults();
+
 	n_keyjazz_keymaps = 0;
 	add_keyjazz_keymap(KEYJAZZ0_KEYMAP_US, 0);
 	add_keyjazz_keymap(KEYJAZZ1_KEYMAP_US, 12);
@@ -190,9 +208,9 @@ int config_compar(const struct cval* other)
 	return memcmp(cvals, other, sizeof(cvals));
 }
 
-void config_install(const struct cval* x)
+bool config_is_defaults(void)
 {
-	memcpy(cvals, x, sizeof(cvals));
+	return config_compar(DEFAULT_CVALS) == 0;
 }
 
 static void read_int(FILE* in, int* i)

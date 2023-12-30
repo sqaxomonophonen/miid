@@ -1205,8 +1205,14 @@ static void g_prefs(void)
 
 	ImGui::BeginDisabled(config_compar(curstate()->config_clone) == 0);
 	ImGui::SameLine();
-	if (ImGui::Button("Revert")) config_install(curstate()->config_clone);
+	if (ImGui::Button("Revert changes")) config_install(curstate()->config_clone);
 	ImGui::SetItemTooltip("Revert configs to before this popup was opened"); // deliberately not using MaybeSetItemTooltip()
+	ImGui::EndDisabled();
+
+	ImGui::BeginDisabled(config_is_defaults());
+	ImGui::SameLine();
+	if (ImGui::Button("Revert to defaults")) config_set_to_defaults();
+	ImGui::SetItemTooltip("Revert configs to defaults"); // deliberately not using MaybeSetItemTooltip()
 	ImGui::EndDisabled();
 
 	ImGui::SeparatorText("Preferences");
