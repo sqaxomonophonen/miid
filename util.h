@@ -63,6 +63,28 @@ static inline char* copystring(char* src)
 	return dst;
 }
 
+static inline void order_2i32(int* i0, int* i1)
+{
+	if (*i0 < *i1) return;
+	const int tmp = *i0;
+	*i0 = *i1;
+	*i1 = tmp;
+}
+
+static inline void order_2f32(float* f0, float* f1)
+{
+	if (*f0 < *f1) return;
+	const int tmp = *f0;
+	*f0 = *f1;
+	*f1 = tmp;
+}
+
+static inline void order_3f32(float* f0, float* f1, float* f2)
+{
+	order_2f32(f0, f1);
+	order_2f32(f1, f2);
+	order_2f32(f0, f1);
+}
 
 #define UTIL_H
 #endif

@@ -189,13 +189,16 @@ struct state {
 	struct mid* myd;
 	struct medit* medit_arr;
 	union timespan selected_timespan;
+	union timespan base_selected_timespan;
 	float beat0_x;
 	float beat_dx;
 	bool bar_select;
 	int timespan_select_mode = SELECT_BAR;
-	bool track_select_set[MAX_TRACKS];
-	bool track_show_set[MAX_TRACKS];
+	int track_select_set[MAX_TRACKS];
 	int primary_track_select = -1;
+	int track_select0;
+	union timespan beat_select0;
+	bool track_show_set[MAX_TRACKS];
 
 	struct {
 		int track_show_mode = SHOW_ALL_TRACKS;
@@ -968,14 +971,14 @@ static void track_toggle(int index)
 	const int n = mid_get_track_count(mid);
 	if (!(0 <= index && index < n)) return;
 	if (index >= ARRAY_LENGTH(state->track_select_set)) return;
-	if (state->track_select_set[index]) {
-		state->track_select_set[index] = false;
+	if (state->track_select_set[index] > 0) {
+		state->track_select_set[index] = 0;
 		if (index == state->primary_track_select) {
 			state->primary_track_select = -1;
 		}
 	} else {
 		state->primary_track_select = index;
-		state->track_select_set[index] = true;
+		state->track_select_set[index] = 1;
 	}
 }
 
@@ -1198,7 +1201,6 @@ static void keypick(const char* label, ImGuiKeyChord* key)
 {
 	ImGui::PushID(label);
 	char key_string[1<<10];
-	struct state* st = curstate();
 	get_key_string(key_string, *key);
 	ImGui::Text("%s", key_string);
 	ImGui::SameLine();
@@ -1312,7 +1314,7 @@ static void g_prefs(void)
 
 static void g_header(void)
 {
-	const int IDLE=0, TIME_PAINT=1, TIMETRACK_PAINT=2, TIME_PAN=3;
+	const int IDLE=0, TIME_DRAG=1, TIMETRACK_DRAG=2, TIME_PAN=3;
 	struct state* state = curstate();
 
 	float layout_y0s[MAX_TRACKS+2];
@@ -1322,7 +1324,6 @@ static void g_header(void)
 	ImGuiIO& io = ImGui::GetIO();
 	const ImVec2 table_p0 = ImGui::GetCursorScreenPos();
 	int new_hover_row_index = -1;
-	bool reset_selection = false;
 	int do_popup_editing_track_index = -1;
 	bool do_open_op_popup = false;
 	bool do_open_song_popup = false;
@@ -1369,7 +1370,7 @@ static void g_header(void)
 
 		int n_selected_tracks = 0;
 		for (int i = 0; i < n_total_tracks; i++) {
-			if (state->track_select_set[i]) n_selected_tracks++;
+			if (state->track_select_set[i] > 0) n_selected_tracks++;
 		}
 
 		for (int row_index = 0; row_index < n_rows; row_index++) {
@@ -1392,7 +1393,7 @@ static void g_header(void)
 				track_index = must_map_row_to_track_index(row_index);
 				if (track_index == state->primary_track_select) {
 					c = CCOLTX(c, primary_track_coltx);
-				} else if (state->track_select_set[track_index]) {
+				} else if (state->track_select_set[track_index] > 0) {
 					c = CCOLTX(c, other_track_coltx);
 				}
 				ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::GetColorU32(c));
@@ -1415,7 +1416,7 @@ static void g_header(void)
 							if (ImGui::Button("A")) {
 								if (n_selected_tracks > 0) {
 									for (int i = 0; i < n_total_tracks; i++) {
-										state->track_show_set[i] = state->track_select_set[i];
+										state->track_show_set[i] = state->track_select_set[i] > 0;
 									}
 									set_new_track_show_mode = SHOW_SELECTED_TRACKS;
 								} else {
@@ -1610,7 +1611,8 @@ static void g_header(void)
 		}
 
 		const float mx = io.MousePos.x - layout_x1;
-		const float mu = (float)((mx - state->beat0_x) * mid->division) / state->beat_dx;
+		bool start_drag = false;
+		bool append_to_selection = false;
 
 		{
 			ImGui::SetCursorPos(ImVec2(layout_x1, table_p0.y));
@@ -1640,12 +1642,23 @@ static void g_header(void)
 			if (!is_drag && state->header.drag_state > IDLE) {
 				state->header.drag_state = IDLE;
 			} else if (click_lmb) {
+				append_to_selection = io.KeyShift;
 				const float my = io.MousePos.y;
-				reset_selection = !io.KeyShift;
+				start_drag = true;
 				if (layout_y0s[0] <= my && my < layout_y0s[1]) {
-					state->header.drag_state = TIME_PAINT;
+					state->header.drag_state = TIME_DRAG;
 				} else {
-					state->header.drag_state = TIMETRACK_PAINT;
+					state->header.drag_state = TIMETRACK_DRAG;
+					for (int i = 0; i < n_total_tracks; i++) {
+						if (io.KeyShift) {
+							if (state->track_select_set[i] == 1) {
+								state->track_select_set[i] = 2;
+							}
+						} else {
+							state->track_select_set[i] = 0;
+						}
+					}
+
 				}
 			} else if (click_rmb) {
 				state->header.drag_state = TIME_PAN;
@@ -1698,46 +1711,71 @@ static void g_header(void)
 			int ttpos = 0;
 			float bx = state->beat0_x;
 			int bar = 0;
-			int tick = 0;
 			int tickpos = 0;
 			int last_spanpos = 0;
 			float last_spanbx = bx;
 
-			const bool is_track_painting = state->header.drag_state == TIMETRACK_PAINT;
-			const bool is_time_painting = (state->header.drag_state == TIME_PAINT) || (state->header.drag_state == TIMETRACK_PAINT);
+			const bool is_track_dragging = state->header.drag_state == TIMETRACK_DRAG;
+			const bool is_time_dragging = (state->header.drag_state == TIME_DRAG) || (state->header.drag_state == TIMETRACK_DRAG);
 
-			if (is_track_painting && new_hover_row_index >= 1) {
-				if (reset_selection) {
-					for (int i = 0; i < n_total_tracks; i++) {
-						state->track_select_set[i] = false;
-					}
-				}
+
+			if (is_track_dragging && new_hover_row_index >= 1) {
 				const int track_index = map_row_to_track_index(new_hover_row_index);
-				if (track_index >= 0) {
+				assert(track_index >= 0);
+				if (start_drag) {
 					state->primary_track_select = track_index;
-					state->track_select_set[track_index] = true;
+					state->track_select0 = track_index;
+				}
+
+				int t0 = state->track_select0;
+				int t1 = track_index;
+				order_2i32(&t0, &t1);
+				for (int t = 0; t < n_total_tracks; t++) {
+					const bool select = (t0 <= t) && (t <= t1);
+					if (select) {
+						state->track_select_set[t] |= 1;
+					} else {
+						state->track_select_set[t] &= ~1;
+					}
 				}
 			}
 
-			if (is_time_painting && state->timespan_select_mode == SELECT_FINE) {
-				if (reset_selection) {
-					state->selected_timespan.start = mu;
-					state->selected_timespan.end = mu;
-				} else {
-					if (mu < state->selected_timespan.start) {
-						state->selected_timespan.start = mu;
-						if (state->selected_timespan.start < 0) {
-							state->selected_timespan.start = 0;
-						}
-					}
-					if (mu > state->selected_timespan.end) {
-						state->selected_timespan.end = mu;
-						if (state->selected_timespan.end > mid->end_of_song_pos) {
-							state->selected_timespan.start = mid->end_of_song_pos;
-						}
+			if (is_time_dragging && state->timespan_select_mode == SELECT_FINE) {
+				const float beat = (float)((mx - state->beat0_x) * mid->division) / state->beat_dx;
+
+				if (start_drag) {
+					state->beat_select0.start = beat;
+					state->beat_select0.end = beat;
+					if (append_to_selection) {
+						state->base_selected_timespan = state->selected_timespan;
+					} else {
+						state->base_selected_timespan.start = beat;
+						state->base_selected_timespan.end = beat;
 					}
 				}
+
+				float beat0 = state->beat_select0.start;
+				float beat1 = beat;
+				order_2f32(&beat0, &beat1);
+				if (beat1 < beat0) {
+					const float tmp = beat0;
+					beat0 = beat1;
+					beat1 = tmp;
+				}
+
+
+				float start0 = beat0;
+				float start1 = state->base_selected_timespan.start;
+				order_2f32(&start0, &start1);
+
+				float end0 = beat1;
+				float end1 = state->base_selected_timespan.end;
+				order_2f32(&end0, &end1);
+
+				state->selected_timespan.start = start0;
+				state->selected_timespan.end = end1;
 			}
+
 
 			const ImVec2 clip0(layout_x1, table_p0.y);
 			const ImVec2 clip1(table_p0.x + table_width, layout_y0s[n_rows]);
@@ -1767,23 +1805,34 @@ static void g_header(void)
 			int pos = 0;
 			while (pos <= mid->end_of_song_pos) {
 				const bool is_spanpos =
-					is_time_painting &&
+					is_time_dragging &&
 					(
 					((state->timespan_select_mode == SELECT_BAR) && tickpos == 0) ||
 					(state->timespan_select_mode == SELECT_TICK)
 					);
 				if (is_spanpos && last_spanbx <= mx && mx < bx) {
-					if (reset_selection) {
-						state->selected_timespan.start = last_spanpos;
-						state->selected_timespan.end = pos;
-					} else {
-						if (last_spanpos < state->selected_timespan.start) {
-							state->selected_timespan.start = last_spanpos;
-						}
-						if (pos > state->selected_timespan.end) {
-							state->selected_timespan.end = pos;
+					const union timespan span = { .start = last_spanpos, .end = pos };
+					if (start_drag) {
+						state->beat_select0 = span;
+						if (append_to_selection) {
+							state->base_selected_timespan = state->selected_timespan;
+						} else {
+							state->base_selected_timespan = state->beat_select0;
 						}
 					}
+
+					float start0 = span.start;
+					float start1 = state->beat_select0.start;
+					float start2 = state->base_selected_timespan.start;
+					order_3f32(&start0, &start1, &start2);
+
+					float end0 = span.end;
+					float end1 = state->beat_select0.end;
+					float end2 = state->base_selected_timespan.end;
+					order_3f32(&end0, &end1, &end2);
+
+					state->selected_timespan.start = start0;
+					state->selected_timespan.end = end2;
 				}
 
 				bool has_signature_change = false;
@@ -1972,7 +2021,7 @@ static void g_pianoroll(void)
 			ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY); // grab mouse wheel
 			const bool is_drag = ImGui::IsItemActive();
 			const bool is_hover = ImGui::IsItemHovered();
-			const bool click_lmb = is_hover && ImGui::IsMouseClicked(0);
+			//const bool click_lmb = is_hover && ImGui::IsMouseClicked(0);
 			const bool click_rmb = is_hover && ImGui::IsMouseClicked(1);
 			const bool doubleclick_rmb = is_hover && ImGui::IsMouseDoubleClicked(1);
 			if (doubleclick_rmb) try_note_fit = true;
@@ -2093,7 +2142,6 @@ static void g_pianoroll(void)
 
 			const int t0 = selected_timespan.start;
 			const int t1 = selected_timespan.end;
-			const float dt = (float)(t1-t0);
 
 			const ImVec4 c0 = CCOL(pianoroll_note_color0);
 			const ImVec4 c1 = CCOL(pianoroll_note_color1);
@@ -2109,7 +2157,7 @@ static void g_pianoroll(void)
 			for (int pass = 0; pass < 2; pass++) {
 				if (pass == 1 && st->primary_track_select < 0) break;
 				for (int track_index = 0; track_index < n_tracks; track_index++) {
-					if (pass == 0 && !st->track_select_set[track_index]) continue;
+					if (pass == 0 && st->track_select_set[track_index] == 0) continue;
 					if (pass == 0 && track_index == st->primary_track_select) continue;
 					if (pass == 1 && track_index != st->primary_track_select) continue;
 					//const bool is_primary = (pass == 1);

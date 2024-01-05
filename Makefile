@@ -2,6 +2,7 @@ CXXFLAGS+=-std=c++11
 CXXFLAGS+=-Wno-narrowing
 LDLIBS+=-lm -pthread
 CXXFLAGS+=-O0 -g
+#CXXFLAGS+=-Wall
 
 PKGS=sdl2 gl fluidsynth
 CXXFLAGS+=$(shell pkg-config --cflags ${PKGS})
