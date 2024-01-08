@@ -31,7 +31,6 @@
 #define RGB(x)      ((struct cval){ .t = T_COLOR       , .v4  = RGB2V4(x)  })
 #define RGBA(x)     ((struct cval){ .t = T_COLOR       , .v4  = RGBA2V4(x) })
 #define KEY(x)      ((struct cval){ .t = T_KEY         , .key = (x)        })
-#define NONE        ((struct cval){ .t = T_NONE })
 
 static struct cval cvals[] = {
 	#define C(NAME,CONSTRUCTOR) CONSTRUCTOR,
@@ -45,6 +44,9 @@ static const struct cval DEFAULT_CVALS[] = {
 	#undef C
 };
 
+static struct cval tool_cvals[CONFIG_MAX_TOOLS][TS_END] = {0};
+
+
 #undef BOOL
 #undef PX
 #undef SLIDE
@@ -57,7 +59,6 @@ static const struct cval DEFAULT_CVALS[] = {
 #undef RGB
 #undef RGBA
 #undef KEY
-#undef NONE
 
 struct cval* config_get_cval(enum config_id id)
 {
@@ -246,6 +247,8 @@ static void read_coltx(FILE* in, struct cval* cv)
 
 #define CONFIG_FILENAME "miid.conf"
 
+const char* TOOL = "TOOL";
+
 void config_load(void)
 {
 	FILE* in = fopen(CONFIG_FILENAME, "r");
@@ -258,6 +261,7 @@ void config_load(void)
 	#define PX(X)       read_float(in, &cv->f32);
 	#define SLIDE(X)    read_float(in, &cv->f32);
 	#define KEY(X)      { int i = 0; read_int(in, &i); cv->key = (ImGuiKeyChord)i; }
+	#define INT         read_int(in, &cv->i32);
 	#define RGB(X)      read_col(in, &cv->v4);
 	#define RGBA(X)     read_col(in, &cv->v4);
 	#define ADD_RGB(X)  read_coltx(in, cv);
@@ -266,32 +270,48 @@ void config_load(void)
 	#define SUB_RGBA(X) read_coltx(in, cv);
 	#define MUL_RGB(X)  read_coltx(in, cv);
 	#define MUL_RGBA(X) read_coltx(in, cv);
-	#define NONE
 
-	#define C(NAME,TYPE) \
-		if (CN(NAME) < CONFIG_END) { \
-			if (strcmp(key, #NAME) == 0) { \
-				struct cval* cv = &cvals[CN(NAME)]; \
-				TYPE; \
-			} \
-		}
 
 	//int n = 0;
 	for (;;) {
-		char key[1<<10];
-		int e0 = fscanf(in, "%s", key);
+		bool handled = false;
+		char buf[1<<10];
+		int e0 = fscanf(in, "%s", buf);
 		if (e0 == -1) break;
-		EMIT_CONFIGS
+		int ti = -1;
+		// TOOLxx_yyyy
+		const size_t tn = strlen(TOOL);
+		if (strlen(buf) >= tn+3 && 0 == memcmp(buf, TOOL, tn) && 1 == sscanf(buf+tn, "%d", &ti) && buf[tn+2] == '_') {
+			char* key = buf+tn+3;
+			#define C(NAME,TYPE) \
+			if (strcmp(key, #NAME) == 0) { \
+				assert(0 <= ti && ti < CONFIG_MAX_TOOLS); \
+				struct cval* cv = &tool_cvals[ti][TN(NAME)]; \
+				TYPE; \
+				handled = true; \
+			}
+			EMIT_TOOL_SETTINGS
+			#undef C
+		} else {
+			char* key = buf;
+			#define C(NAME,TYPE) \
+			if (strcmp(key, #NAME) == 0) { \
+				struct cval* cv = &cvals[CN(NAME)]; \
+				TYPE; \
+				handled = true; \
+			}
+			EMIT_CONFIGS
+			#undef C
+		}
 		if (fscanf(in, "\n") != 0) break;
 		//n++;
 	}
 	//printf("read %d configs\n", n);
 
-	#undef C
 
-	#undef NONE
 	#undef C
 	#undef KEY
+	#undef INT
 	#undef RGB
 	#undef RGBA
 	#undef ADD_RGB
@@ -343,6 +363,7 @@ void config_save(void)
 	#define PX(X)       write_f32(out, cv.f32);
 	#define SLIDE(X)    write_f32(out, cv.f32);
 	#define KEY(X)      write_int(out, (int)cv.key);
+	#define INT         write_int(out, cv.i32);
 	#define RGB(X)      write_col(out, cv.v4);
 	#define RGBA(X)     write_col(out, cv.v4);
 	#define ADD_RGB(X)  write_coltx(out, &cv);
@@ -351,21 +372,32 @@ void config_save(void)
 	#define SUB_RGBA(X) write_coltx(out, &cv);
 	#define MUL_RGB(X)  write_coltx(out, &cv);
 	#define MUL_RGBA(X) write_coltx(out, &cv);
-	#define NONE
 
 	#define C(NAME,TYPE) \
-		if (CN(NAME) < CONFIG_END) { \
-			fprintf(out, "%s ", #NAME); \
-			struct cval cv = cvals[CN(NAME)]; \
-			TYPE; \
-			fprintf(out, "\n"); \
-		}
+	{ \
+		fprintf(out, "%s ", #NAME); \
+		struct cval cv = cvals[CN(NAME)]; \
+		TYPE; \
+		fprintf(out, "\n"); \
+	}
 	EMIT_CONFIGS
 	#undef C
 
-	#undef NONE
+	for (int i = 0; i < CONFIG_MAX_TOOLS; i++) {
+		struct cval* cvs = tool_cvals[i];
+		if (cvs[TS_tool_type].i32 == 0) break;
+		#define C(NAME,TYPE) \
+			fprintf(out, "TOOL%.2d_%s ", i, #NAME); \
+			struct cval cv = cvs[TN(NAME)]; \
+			TYPE; \
+			fprintf(out, "\n");
+		EMIT_TOOL_SETTINGS
+		#undef C
+	}
+
 	#undef C
 	#undef KEY
+	#undef INT
 	#undef RGB
 	#undef RGBA
 	#undef ADD_RGB

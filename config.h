@@ -45,15 +45,28 @@ C(  pianoroll_note_border_size          , PX(1)                         ) \
 C(  pianoroll_note_other_track_coltx    , MUL_RGBA(0x4080ff80)          ) \
 C(  percussion_line_width               , PX(3)                         ) \
 C(  percussion_dot_radius               , PX(5)                         ) \
-C(  toggle_keyjazz_tester_key           , KEY(ImGuiKey_GraveAccent)     ) \
-C(  END                                 , NONE                          )
+C(  toggle_keyjazz_tester_key           , KEY(ImGuiKey_GraveAccent)     )
+
+#define CONFIG_MAX_TOOLS (100)
+
+#define EMIT_TOOL_SETTINGS                                                \
+C(  tool_type                           , INT                           )
 
 #define CN(NAME) CONFIG_ ## NAME
+#define TN(NAME) TS_ ## NAME
 
 enum config_id {
 	#define C(NAME,DEFAULT) CN(NAME),
 	EMIT_CONFIGS
 	#undef C
+	CONFIG_END
+};
+
+enum tool_setting_id {
+	#define C(NAME,DEFAULT) TN(NAME),
+	EMIT_TOOL_SETTINGS
+	#undef C
+	TS_END
 };
 
 enum : int {
@@ -73,6 +86,7 @@ struct cval {
 	union {
 		bool b;
 		float f32;
+		int i32;
 		ImVec4 v4;
 		ImGuiKeyChord key;
 	};

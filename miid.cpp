@@ -1045,6 +1045,11 @@ static void MaybeSetItemTooltip(const char* fmt, ...)
 	va_end(args);
 }
 
+static bool LRButton(const char* label, const ImVec2& sz = ImVec2(0, 0))
+{
+	return ImGui::ButtonEx(label, sz, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+}
+
 static inline float mouse_wheel_scalar(float wheel)
 {
 	return powf(lerp(1.001f, 1.4f, CFLOAT(wheel_sensitivity)), wheel);
@@ -1287,7 +1292,6 @@ static void g_prefs(void)
 	#define SUB_RGBA(X) coltxpick(label, &cval->v4, &cval->t);
 	#define MUL_RGB(X)  coltxpick(label, &cval->v4, &cval->t);
 	#define MUL_RGBA(X) coltxpick(label, &cval->v4, &cval->t);
-	#define NONE
 
 	#define C(NAME,TYPE) \
 	{ \
@@ -1296,7 +1300,6 @@ static void g_prefs(void)
 		TYPE \
 	}
 	EMIT_CONFIGS
-	#undef NONE
 	#undef C
 	#undef KEY
 	#undef RGB
@@ -1482,7 +1485,7 @@ static void g_header(void)
 						trk->midi_channel+1,
 						track_index);
 					const ImVec2 sz = ImVec2(ImGui::GetColumnWidth(), 0);
-					if (ImGui::ButtonEx(label, sz, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight)) {
+					if (LRButton(label, sz)) {
 						if (ImGui::IsMouseReleased(0)) {
 							track_toggle(track_index);
 						} else if (ImGui::IsMouseReleased(1)) {
@@ -1993,7 +1996,7 @@ static void g_pianoroll(void)
 	const bool have_selected_timespan = selected_timespan.end > selected_timespan.start;
 
 	const ImVec2 avail = ImGui::GetContentRegionAvail();
-	const float table_height = avail.y - 4 - ImGui::GetFrameHeightWithSpacing();
+	const float table_height = avail.y - 10 - ImGui::GetFrameHeightWithSpacing();
 	const int n_columns = 2;
 	const ImGuiTableFlags table_flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersV;
 	const ImVec2 table_p0 = ImGui::GetCursorScreenPos();
@@ -2018,6 +2021,7 @@ static void g_pianoroll(void)
 			w0 = ImGui::GetColumnWidth();
 			const ImVec2 sz(w0, table_height);
 			ImGui::InvisibleButton("keys", sz, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+			MaybeSetItemTooltip("Right-click: pan. Wheel: zoom");
 			ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY); // grab mouse wheel
 			const bool is_drag = ImGui::IsItemActive();
 			const bool is_hover = ImGui::IsItemHovered();
@@ -2052,6 +2056,7 @@ static void g_pianoroll(void)
 			w1 = ImGui::GetColumnWidth();
 			const ImVec2 sz(w1, table_height);
 			ImGui::InvisibleButton("pianoroll", sz, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+			MaybeSetItemTooltip("Current tool: TODO: Left-click: TODO"); // TODO
 			ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY); // grab mouse wheel
 			//const bool is_drag = ImGui::IsItemActive();
 			//const bool is_hover = ImGui::IsItemHovered();
@@ -2227,7 +2232,101 @@ static void g_pianoroll(void)
 		ImGui::PopFont();
 	}
 
+	{
+		if (LRButton("Tool")) {
+			if (ImGui::IsMouseReleased(0)) {
+				ImGui::OpenPopup("tool");
+			} else if (ImGui::IsMouseReleased(1)) {
+				printf("TODO last tool\n");
+			}
+
+		}
+		MaybeSetItemTooltip("Left-click: open tool settings, Right-click: select previous tool");
+		if (ImGui::BeginPopup("tool")) {
+			#if 0
+			for (int i = 0; i < 10; i++) ImGui::Text("Ding dong %.3d .z.z.z.zzzzzzzzzzzzzzzzzzzzzzzzzzzz\n", i);
+			#endif
+
+			if (ImGui::BeginListBox("Preset")) {
+				//const int n_presets = arrlen
+				ImGui::EndListBox();
+			}
+
+
+
+
+
+
+			ImGui::EndPopup();
+		}
+	}
+
+	#if 0
+	{
+		static int e0 = 0;
+		if (RadiaButton("Note", &e0, 0)) {
+		}
+		ImGui::SameLine();
+		if (RadiaButton("Vel", &e0, 1)) {
+		}
+		ImGui::SameLine();
+		if (RadiaButton("Curv", &e0, 2)) {
+		}
+
+		//const char* SEP = " ·· ";
+		const char* SEP = "··";
+
+		ImGui::SameLine();
+		ImGui::TextUnformatted(SEP);
+
+		static int e1 = 0;
+		ImGui::SameLine();
+		if (RadiaButton("Edit", &e1, 0)) {
+		}
+		ImGui::SameLine();
+		if (RadiaButton("Art", &e1, 1)) {
+		}
+		ImGui::SameLine();
+		if (RadiaButton("Seq", &e1, 2)) {
+		}
+
+		ImGui::SameLine();
+		ImGui::TextUnformatted(SEP);
+		ImGui::SameLine();
+		if (ImGui::Button("Select")) {
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("BrushDef")) {
+		}
+
+		if (e0 == 2) {
+			static int e2 = 0;
+			const char* curve_types[] = {
+				"Pitch Bend",
+				"(CC1) Modulation Wheel",
+				"(CC7) Volume",
+				"(CC10) Pan",
+				"(CC64) Damper Pedal",
+				"(CC91/FX1) Reverb",
+				"(CC93/FX3) Chorus",
+			};
+			ImGui::SameLine();
+			ImGui::TextUnformatted(SEP);
+			ImGui::SameLine();
+			if (ImGui::BeginCombo("##curvetypecombo", curve_types[e2], ImGuiComboFlags_WidthFitPreview)) {
+				for (int i = 0; i < ARRAY_LENGTH(curve_types); i++) {
+					if (ImGui::Selectable(curve_types[i], i == e2)) {
+						e2 = i;
+					}
+				}
+				ImGui::EndCombo();
+			}
+		}
+	}
+	#endif
+
 	// bottom toolbar
+	#if 0
 	{
 		enum {
 			TOOL_NOTE,
@@ -2245,9 +2344,12 @@ static void g_pianoroll(void)
 		MaybeSetItemTooltip("Paint notes\nLeft-click to paint\nRight-click to erase (bbox)\nWheel changes velocity\nPage up/down navigates brush history");
 
 		ImGui::SameLine();
+
+		//ImGui::BeginDisabled();
 		if (RadiaButton("Curv", &e2, TOOL_CURV)) {
 			brushen = false;
 		}
+		//ImGui::EndDisabled();
 		MaybeSetItemTooltip("Paint curves (pitchbend/CC)\nLeft-click to paint\nRight-click to zero\nWheel changes curve view height\nPage up/down navigates brush history");
 
 		ImGui::SameLine();
@@ -2324,6 +2426,7 @@ static void g_pianoroll(void)
 			ImGui::EndPopup();
 		}
 	}
+	#endif
 }
 
 static void g_edit(void)
