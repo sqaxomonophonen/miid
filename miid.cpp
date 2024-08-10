@@ -2600,6 +2600,8 @@ void miid_init(int argc, char** argv, float sample_rate)
 	g.current_soundfont_index = 0;
 	refresh_soundfont();
 
+	config_load();
+
 	if (argc == 1) {
 		push_state_blank();
 	} else {
@@ -2616,8 +2618,6 @@ void miid_init(int argc, char** argv, float sample_rate)
 			}
 		}
 	}
-
-	config_load();
 }
 
 bool miid_frame(void* usr, bool request_close)
