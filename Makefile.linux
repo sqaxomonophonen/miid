@@ -1,0 +1,4 @@
+PKGS=sdl2 gl fluidsynth
+CXXFLAGS+=$(shell pkg-config --cflags ${PKGS})
+LDLIBS+=$(shell pkg-config --libs ${PKGS})
+include Makefile

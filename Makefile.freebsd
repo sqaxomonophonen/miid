@@ -1,0 +1,4 @@
+incroot=/usr/local/include
+CXXFLAGS+=-I$(incroot) -I$(incroot)/SDL2 -I$(incroot)/GL
+LDLIBS+=-L/usr/local/lib -lSDL2 -lfluidsynth -lGL
+include Makefile
